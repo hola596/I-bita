@@ -8,7 +8,10 @@ import {
   Lock,
   ExternalLink,
 } from "lucide-react";
-import { resolveDemoOrBookingCheckinStateAction } from "@/modules/consortium/actions";
+import {
+  resolveDemoOrBookingCheckinStateAction,
+  getBookingAccessDetailsAction,
+} from "@/modules/consortium/actions";
 import { BiometricCheckinFlow } from "@/components/kyc/BiometricCheckinFlow";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +46,13 @@ export default async function BiometricPreCheckinPage({
 
   const checkinState = stateRes.data;
   const { booking, consortium } = checkinState;
+
+  // Para el verificador de acceso usa el token del cupo activo (o el de la URL)
+  const accessRes = await getBookingAccessDetailsAction(
+    booking.id,
+    token ?? checkinState.activeSlot?.inviteToken ?? null
+  );
+  const access = accessRes.ok ? accessRes.data : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -107,6 +117,50 @@ export default async function BiometricPreCheckinPage({
 
       {/* Flujo Móvil Interactivo de Verificación Biométrica */}
       <BiometricCheckinFlow initialState={checkinState} />
+
+      {/* Compuerta Zero-Trust (Story 3.3): el PIN y el QR solo se renderizan en servidor con 100% verificado */}
+      <section
+        aria-labelledby="access-gate-heading"
+        className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5 space-y-3"
+      >
+        <h2 id="access-gate-heading" className="text-xl font-extrabold">
+          Acceso a la Unidad y Pase de Portería
+        </h2>
+        {access && access.accessCode ? (
+          <div className="space-y-4">
+            <p>
+              PIN de cerradura:{" "}
+              <code className="rounded-lg bg-[var(--bg-primary)] px-3 py-1 text-lg font-black">
+                {access.accessCode}
+              </code>
+            </p>
+            {access.porteriaPass && (
+              <div className="space-y-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={access.porteriaPass.qrDataUrl}
+                  alt="Código QR del Pase Digital de Portería"
+                  width={240}
+                  height={240}
+                  className="rounded-xl bg-white p-2"
+                />
+                <p className="text-xs break-all">
+                  Verificador:{" "}
+                  <a className="underline" href={access.porteriaPass.verificationUrl}>
+                    abrir pase en portería
+                  </a>
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--text-secondary)]">
+            <Lock className="inline h-4 w-4" aria-hidden="true" /> Bloqueado en el
+            servidor hasta que el 100% de los adultos declarados complete su
+            verificación. Recargá la página al finalizar.
+          </p>
+        )}
+      </section>
     </div>
   );
 }

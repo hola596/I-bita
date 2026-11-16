@@ -19,6 +19,13 @@ import {
   type VerifyGuestBiometricsInput,
   type MicroCanonPct,
 } from "./validators";
+import { decryptAccessCode } from "@/lib/crypto/aes-gcm";
+import {
+  buildPorteriaVerificationUrl,
+  signAndGeneratePorteriaPassQr,
+  verifyPorteriaPassJws,
+  type PorteriaPassJwsClaims,
+} from "@/lib/crypto/porteria-jws";
 import { parseArgentineDniPdf417 } from "./pdf417-parser";
 import {
   auditGuestBiometricsWithGemini,
@@ -1294,6 +1301,524 @@ export async function verifyGuestBiometricsAction(
         message: appErr.message,
         details: appErr.details,
       },
+    };
+  } finally {
+    await pgClient.end();
+  }
+}
+
+// ============================================================================
+// Story 3.3 (E3-S3) — Compuerta Criptográfica Zero-Trust y Pase Digital de Portería
+// ============================================================================
+
+export interface PorteriaPassPublicView {
+  qrDataUrl: string;
+  verificationUrl: string;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface BookingAccessDetails {
+  bookingId: string;
+  status: string;
+  verifiedAdultsCount: number;
+  declaredAdultsCount: number;
+  /** PIN en texto plano: `null` mientras el 100% de los adultos no esté verificado. */
+  accessCode: string | null;
+  porteriaPass: PorteriaPassPublicView | null;
+}
+
+export interface VerifiedPorteriaPassView {
+  consortiumName: string;
+  propertyTitle: string;
+  addressLine: string;
+  unitIdentifier: string;
+  checkIn: string;
+  checkOut: string;
+  vehiclePlate: string | null;
+  declaredAdultsCount: number;
+  verifiedAdultsCount: number;
+  verifiedGuests: Array<{
+    slotIndex: number;
+    isPrimaryGuest: boolean;
+    fullName: string;
+    maskedDni: string;
+  }>;
+  issuedAt: string | null;
+  expiresAt: string | null;
+}
+
+interface BookingGateSnapshot {
+  bookingId: string;
+  propertyId: string;
+  hostId: string;
+  guestId: string | null;
+  propertySlug: string;
+  propertyTitle: string;
+  addressLine: string;
+  unitIdentifier: string;
+  checkIn: string;
+  checkOut: string;
+  status: string;
+  vehiclePlate: string | null;
+  declaredAdultsCount: number;
+  verifiedAdultsCount: number;
+  consortiumName: string;
+  slots: Array<{
+    id: string;
+    inviteToken: string;
+    isPrimaryGuest: boolean;
+    status: string;
+    documentNumber: string | null;
+    fullName: string | null;
+    confidence: number | null;
+    verifiedAt: string | null;
+  }>;
+  /** `true` solo si reserva + 100% de `guest_verifications` cumplen la condición Zero-Trust. */
+  gateOpen: boolean;
+}
+
+/**
+ * Lee en una sola consulta consistente el estado de la reserva y de todos sus cupos
+ * (`public.guest_verifications`) y calcula la compuerta. NO selecciona `access_code_*`.
+ */
+async function loadBookingGateSnapshot(
+  pgClient: Client,
+  bookingId: string
+): Promise<BookingGateSnapshot | null> {
+  const bRes = await pgClient.query<Record<string, unknown>>(
+    `SELECT
+       b.id, b.property_id, b.guest_id, b.status::text AS status,
+       b.check_in::text AS check_in, b.check_out::text AS check_out,
+       b.declared_adults_count, b.verified_adults_count, b.vehicle_plate,
+       p.host_id, p.slug, p.title, p.address_line, p.unit_identifier,
+       COALESCE(cc.consortium_name, p.title) AS consortium_name
+     FROM public.bookings b
+     INNER JOIN public.properties p ON p.id = b.property_id
+     LEFT JOIN public.consortium_configs cc
+       ON cc.property_id = p.id AND cc.active = TRUE
+     WHERE b.id = $1
+     LIMIT 1`,
+    [bookingId]
+  );
+  const b = bRes.rows[0];
+  if (!b) return null;
+
+  const sRes = await pgClient.query<Record<string, unknown>>(
+    `SELECT id, invite_token, is_primary_guest, status::text AS status,
+            document_number, full_name_extracted,
+            biometric_confidence_score::text AS confidence, verified_at
+     FROM public.guest_verifications
+     WHERE booking_id = $1
+     ORDER BY is_primary_guest DESC, created_at ASC, id ASC`,
+    [bookingId]
+  );
+
+  const slots = sRes.rows.map((s) => ({
+    id: String(s.id),
+    inviteToken: String(s.invite_token),
+    isPrimaryGuest: Boolean(s.is_primary_guest),
+    status: String(s.status),
+    documentNumber: s.document_number ? String(s.document_number) : null,
+    fullName: s.full_name_extracted ? String(s.full_name_extracted) : null,
+    confidence: s.confidence !== null && s.confidence !== undefined ? Number(s.confidence) : null,
+    verifiedAt:
+      s.verified_at instanceof Date
+        ? s.verified_at.toISOString()
+        : s.verified_at
+        ? String(s.verified_at)
+        : null,
+  }));
+
+  const declared = Number(b.declared_adults_count);
+  const verified = Number(b.verified_adults_count);
+  const verifiedSlots = slots.filter((s) => s.status === "VERIFIED").length;
+
+  const gateOpen =
+    String(b.status) === "ALL_ADULTS_VERIFIED" &&
+    verified === declared &&
+    slots.length === declared &&
+    verifiedSlots === declared;
+
+  return {
+    bookingId: String(b.id),
+    propertyId: String(b.property_id),
+    hostId: String(b.host_id),
+    guestId: b.guest_id ? String(b.guest_id) : null,
+    propertySlug: String(b.slug),
+    propertyTitle: String(b.title),
+    addressLine: String(b.address_line),
+    unitIdentifier: String(b.unit_identifier),
+    checkIn: String(b.check_in),
+    checkOut: String(b.check_out),
+    status: String(b.status),
+    vehiclePlate: b.vehicle_plate ? String(b.vehicle_plate) : null,
+    declaredAdultsCount: declared,
+    verifiedAdultsCount: verified,
+    consortiumName: String(b.consortium_name),
+    slots,
+    gateOpen,
+  };
+}
+
+/**
+ * Solo pueden consultar el acceso: el huésped titular autenticado, el anfitrión dueño,
+ * o quien presente el `invite_token` de un cupo de ESA reserva.
+ */
+function isAuthorizedForBookingAccess(
+  snapshot: BookingGateSnapshot,
+  userId: string | null,
+  inviteToken: string | null | undefined
+): boolean {
+  if (userId && (userId === snapshot.guestId || userId === snapshot.hostId)) {
+    return true;
+  }
+  const token = inviteToken?.trim();
+  return Boolean(token && snapshot.slots.some((s) => s.inviteToken === token));
+}
+
+/**
+ * Emite (o reutiliza) el Pase Digital JWS + QR persistido en `public.porteria_passes`.
+ * Idempotente por `booking_id UNIQUE`. Exige `snapshot.gateOpen`.
+ */
+async function issueOrLoadPorteriaPass(
+  pgClient: Client,
+  snapshot: BookingGateSnapshot
+): Promise<PorteriaPassPublicView> {
+  if (!snapshot.gateOpen) {
+    throw new AppError(
+      "ZERO_TRUST_ACCESS_LOCKED",
+      "El Pase de Portería exige el 100% de los adultos declarados verificados biométricamente.",
+      403
+    );
+  }
+
+  const existing = await pgClient.query<{
+    jws_token: string;
+    qr_data_url: string;
+    revoked: boolean;
+  }>(
+    `SELECT jws_token, qr_data_url, revoked
+     FROM public.porteria_passes WHERE booking_id = $1 LIMIT 1`,
+    [snapshot.bookingId]
+  );
+
+  const reuse = existing.rows[0];
+  if (reuse) {
+    if (reuse.revoked) {
+      throw new AppError(
+        "ZERO_TRUST_ACCESS_LOCKED",
+        "El Pase de Portería de esta reserva fue revocado.",
+        403
+      );
+    }
+    try {
+      const verified = await verifyPorteriaPassJws(reuse.jws_token);
+      return {
+        qrDataUrl: reuse.qr_data_url,
+        verificationUrl: buildPorteriaVerificationUrl(reuse.jws_token),
+        issuedAt: verified.issuedAt ?? new Date().toISOString(),
+        expiresAt: verified.expiresAt ?? new Date().toISOString(),
+      };
+    } catch {
+      // Token almacenado expirado o inválido: se re-firma abajo y se reemplaza.
+    }
+  }
+
+  const claims: PorteriaPassJwsClaims = {
+    bookingId: snapshot.bookingId,
+    propertyId: snapshot.propertyId,
+    propertySlug: snapshot.propertySlug,
+    propertyTitle: snapshot.propertyTitle,
+    consortiumName: snapshot.consortiumName,
+    addressLine: snapshot.addressLine,
+    unitIdentifier: snapshot.unitIdentifier,
+    checkIn: snapshot.checkIn,
+    checkOut: snapshot.checkOut,
+    declaredAdultsCount: snapshot.declaredAdultsCount,
+    verifiedAdultsCount: snapshot.verifiedAdultsCount,
+    vehiclePlate: snapshot.vehiclePlate,
+    verifiedGuests: snapshot.slots.map((s, idx) => ({
+      slotIndex: idx + 1,
+      isPrimaryGuest: s.isPrimaryGuest,
+      fullName: s.fullName ?? "Adulto verificado",
+      maskedDni: maskArgentineDni(s.documentNumber) ?? "•••.•••",
+      documentType: "DNI_ARG",
+      confidenceScore: Math.min(100, Math.max(85, s.confidence ?? 85)),
+      verifiedAt: s.verifiedAt ?? new Date().toISOString(),
+    })),
+  };
+
+  const artifact = await signAndGeneratePorteriaPassQr(claims);
+
+  // `revoked = FALSE` en el UPSERT: nunca "resucita" un pase revocado (ya rechazado arriba).
+  await pgClient.query(
+    `INSERT INTO public.porteria_passes (booking_id, jws_token, qr_data_url)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (booking_id) DO UPDATE
+       SET jws_token = EXCLUDED.jws_token, qr_data_url = EXCLUDED.qr_data_url
+       WHERE public.porteria_passes.revoked = FALSE`,
+    [snapshot.bookingId, artifact.jwsToken, artifact.qrDataUrl]
+  );
+
+  return {
+    qrDataUrl: artifact.qrDataUrl,
+    verificationUrl: artifact.verificationUrl,
+    issuedAt: artifact.issuedAt,
+    expiresAt: artifact.expiresAt,
+  };
+}
+
+/**
+ * Compuerta Zero-Trust (AD-5): mientras falte algún adulto por verificar retorna
+ * `accessCode: null` y `porteriaPass: null` SIN desencriptar jamás el PIN.
+ * Con el 100% verificado desencripta `AES-256-GCM` (AAD = `property_id`) en memoria del
+ * servidor y emite el Pase QR. Requiere sesión del huésped/anfitrión o `inviteToken` de la reserva.
+ */
+export async function getBookingAccessDetailsAction(
+  bookingId: string,
+  inviteToken?: string | null
+): Promise<ActionResult<BookingAccessDetails>> {
+  const validId = z.string().trim().uuid().safeParse(bookingId);
+  if (!validId.success) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "El identificador de la reserva no es un UUID válido.",
+      },
+    };
+  }
+
+  const userId = await resolveAuthenticatedUserId();
+  const pgClient = createServerPgClient();
+  await pgClient.connect();
+
+  try {
+    const snapshot = await loadBookingGateSnapshot(pgClient, validId.data);
+    if (!snapshot) {
+      return {
+        ok: false,
+        error: { code: "NOT_FOUND", message: "No se encontró la reserva solicitada." },
+      };
+    }
+
+    if (!isAuthorizedForBookingAccess(snapshot, userId, inviteToken)) {
+      return {
+        ok: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "No estás autorizado para consultar el acceso de esta reserva.",
+        },
+      };
+    }
+
+    if (!snapshot.gateOpen) {
+      return {
+        ok: true,
+        data: {
+          bookingId: snapshot.bookingId,
+          status: snapshot.status,
+          verifiedAdultsCount: snapshot.verifiedAdultsCount,
+          declaredAdultsCount: snapshot.declaredAdultsCount,
+          accessCode: null,
+          porteriaPass: null,
+        },
+      };
+    }
+
+    // Compuerta abierta: recién ahora se leen y desencriptan las columnas `access_code_*`.
+    const pinRes = await pgClient.query<{
+      access_code_ciphertext: string;
+      access_code_iv: string;
+      access_code_auth_tag: string;
+    }>(
+      `SELECT access_code_ciphertext, access_code_iv, access_code_auth_tag
+       FROM public.properties WHERE id = $1 LIMIT 1`,
+      [snapshot.propertyId]
+    );
+    const pinRow = pinRes.rows[0];
+    if (!pinRow) {
+      return {
+        ok: false,
+        error: { code: "NOT_FOUND", message: "No se encontró la unidad funcional." },
+      };
+    }
+
+    const accessCode = decryptAccessCode(
+      {
+        ciphertext: pinRow.access_code_ciphertext,
+        iv: pinRow.access_code_iv,
+        authTag: pinRow.access_code_auth_tag,
+      },
+      snapshot.propertyId
+    );
+
+    const pass = await issueOrLoadPorteriaPass(pgClient, snapshot);
+
+    return {
+      ok: true,
+      data: {
+        bookingId: snapshot.bookingId,
+        status: snapshot.status,
+        verifiedAdultsCount: snapshot.verifiedAdultsCount,
+        declaredAdultsCount: snapshot.declaredAdultsCount,
+        accessCode,
+        porteriaPass: pass,
+      },
+    };
+  } catch (err: unknown) {
+    const appErr =
+      err instanceof AppError
+        ? err
+        : AppError.fromPostgresError(err as { code?: string; message?: string });
+    return {
+      ok: false,
+      error: { code: appErr.code, message: appErr.message },
+    };
+  } finally {
+    await pgClient.end();
+  }
+}
+
+/**
+ * Emite explícitamente el Pase Digital de Portería (sin revelar el PIN).
+ * Falla con `ZERO_TRUST_ACCESS_LOCKED` si falta algún adulto por verificar.
+ */
+export async function issuePorteriaPassAction(
+  bookingId: string,
+  inviteToken?: string | null
+): Promise<ActionResult<PorteriaPassPublicView>> {
+  const validId = z.string().trim().uuid().safeParse(bookingId);
+  if (!validId.success) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "El identificador de la reserva no es un UUID válido.",
+      },
+    };
+  }
+
+  const userId = await resolveAuthenticatedUserId();
+  const pgClient = createServerPgClient();
+  await pgClient.connect();
+
+  try {
+    const snapshot = await loadBookingGateSnapshot(pgClient, validId.data);
+    if (!snapshot) {
+      return {
+        ok: false,
+        error: { code: "NOT_FOUND", message: "No se encontró la reserva solicitada." },
+      };
+    }
+    if (!isAuthorizedForBookingAccess(snapshot, userId, inviteToken)) {
+      return {
+        ok: false,
+        error: {
+          code: "FORBIDDEN",
+          message: "No estás autorizado para emitir el pase de esta reserva.",
+        },
+      };
+    }
+    const pass = await issueOrLoadPorteriaPass(pgClient, snapshot);
+    return { ok: true, data: pass };
+  } catch (err: unknown) {
+    const appErr =
+      err instanceof AppError
+        ? err
+        : AppError.fromPostgresError(err as { code?: string; message?: string });
+    return {
+      ok: false,
+      error: { code: appErr.code, message: appErr.message },
+    };
+  } finally {
+    await pgClient.end();
+  }
+}
+
+/**
+ * Verificador público para guardia/portería: valida firma JWS (`jose`), que el token
+ * coincida con el pase persistido y que `revoked = FALSE`. Devuelve SOLO datos mínimos
+ * (DNI enmascarado); jamás PIN ni `access_code_*`.
+ */
+export async function verifyPorteriaPassTokenAction(
+  token: string
+): Promise<ActionResult<VerifiedPorteriaPassView>> {
+  let verified;
+  try {
+    verified = await verifyPorteriaPassJws(token);
+  } catch (err: unknown) {
+    const appErr =
+      err instanceof AppError
+        ? err
+        : new AppError("CRYPTO_INTEGRITY_ERROR", "Token inválido.", 401);
+    return {
+      ok: false,
+      error: { code: appErr.code, message: appErr.message },
+    };
+  }
+
+  const pgClient = createServerPgClient();
+  await pgClient.connect();
+  try {
+    const cleanToken = decodeURIComponent(token.trim());
+    const passRes = await pgClient.query<{ revoked: boolean }>(
+      `SELECT revoked FROM public.porteria_passes
+       WHERE booking_id = $1 AND jws_token = $2 LIMIT 1`,
+      [verified.claims.bookingId, cleanToken]
+    );
+    const row = passRes.rows[0];
+    if (!row) {
+      return {
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "El pase no existe o fue reemplazado por uno más reciente.",
+        },
+      };
+    }
+    if (row.revoked) {
+      return {
+        ok: false,
+        error: {
+          code: "ZERO_TRUST_ACCESS_LOCKED",
+          message: "El pase fue revocado. Ingreso NO autorizado.",
+        },
+      };
+    }
+
+    const c = verified.claims;
+    return {
+      ok: true,
+      data: {
+        consortiumName: c.consortiumName,
+        propertyTitle: c.propertyTitle,
+        addressLine: c.addressLine,
+        unitIdentifier: c.unitIdentifier,
+        checkIn: c.checkIn,
+        checkOut: c.checkOut,
+        vehiclePlate: c.vehiclePlate,
+        declaredAdultsCount: c.declaredAdultsCount,
+        verifiedAdultsCount: c.verifiedAdultsCount,
+        verifiedGuests: c.verifiedGuests.map((g) => ({
+          slotIndex: g.slotIndex,
+          isPrimaryGuest: g.isPrimaryGuest,
+          fullName: g.fullName,
+          maskedDni: g.maskedDni,
+        })),
+        issuedAt: verified.issuedAt,
+        expiresAt: verified.expiresAt,
+      },
+    };
+  } catch (err: unknown) {
+    const appErr =
+      err instanceof AppError
+        ? err
+        : AppError.fromPostgresError(err as { code?: string; message?: string });
+    return {
+      ok: false,
+      error: { code: appErr.code, message: appErr.message },
     };
   } finally {
     await pgClient.end();
