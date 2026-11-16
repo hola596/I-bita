@@ -299,12 +299,29 @@ DROP POLICY IF EXISTS "bookings_select_involved" ON public.bookings;
 CREATE POLICY "bookings_select_involved" ON public.bookings
   FOR SELECT USING (
     auth.uid() = guest_id OR
-    EXISTS (SELECT 1 FROM public.properties p WHERE p.id = property_id AND p.host_id = auth.uid())
+    EXISTS (
+      SELECT 1 FROM public.properties p
+      WHERE p.id = property_id AND (p.host_id = auth.uid() OR p.is_published = TRUE)
+    )
   );
 
 DROP POLICY IF EXISTS "bookings_insert_authenticated" ON public.bookings;
 CREATE POLICY "bookings_insert_authenticated" ON public.bookings
-  FOR INSERT WITH CHECK (auth.uid() = guest_id);
+  FOR INSERT WITH CHECK (
+    auth.uid() = guest_id OR
+    (status = 'ICAL_BLOCK' AND EXISTS (SELECT 1 FROM public.properties p WHERE p.id = property_id AND p.host_id = auth.uid()))
+  );
+
+DROP POLICY IF EXISTS "bookings_update_involved" ON public.bookings;
+CREATE POLICY "bookings_update_involved" ON public.bookings
+  FOR UPDATE USING (
+    auth.uid() = guest_id OR
+    EXISTS (SELECT 1 FROM public.properties p WHERE p.id = property_id AND p.host_id = auth.uid())
+  )
+  WITH CHECK (
+    auth.uid() = guest_id OR
+    EXISTS (SELECT 1 FROM public.properties p WHERE p.id = property_id AND p.host_id = auth.uid())
+  );
 
 -- 14.6 Policies para public.guest_verifications
 DROP POLICY IF EXISTS "guest_verifications_select_involved" ON public.guest_verifications;

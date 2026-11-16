@@ -33,6 +33,7 @@ import {
   type PropertyImageItem,
 } from "@/modules/properties/validators";
 import type { SafePropertyRecord } from "@/modules/properties/queries";
+import { PropertyIcalSyncPanel } from "./PropertyIcalSyncPanel";
 
 const DEFAULT_COVER_PHOTO: PropertyImageItem = {
   url: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
@@ -948,6 +949,11 @@ export function PropertyDashboardClient({
                         Editar
                       </button>
                     </div>
+
+                    <PropertyIcalSyncPanel
+                      propertyId={prop.id}
+                      propertyTitle={prop.title}
+                    />
                   </div>
                 </article>
               );
