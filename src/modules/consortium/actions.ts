@@ -573,7 +573,7 @@ export interface VerifyGuestBiometricsSuccessResult {
 /**
  * Enmascara el número de DNI para exhibición segura en UI (`38456789` -> `•••.•••.789`).
  */
-export function maskArgentineDni(dni: string | null | undefined): string | null {
+function maskArgentineDni(dni: string | null | undefined): string | null {
   if (!dni) return null;
   const digits = dni.replace(/\D/g, "");
   if (digits.length < 4) return "•••.•••";
