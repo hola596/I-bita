@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "db:migrate": "tsx scripts/migrate.ts",
-    "gate:1": "tsx scripts/gates/gate-epic-1-btree-gist.ts"
+    "gate:1": "tsx scripts/gates/gate-epic-1-btree-gist.ts",
+    "verify:2.1": "tsx scripts/gates/verify-story-2-1.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",

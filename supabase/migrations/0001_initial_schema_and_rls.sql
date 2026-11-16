@@ -354,3 +354,9 @@ CREATE POLICY "ledger_entries_select_involved" ON public.ledger_entries
 DROP POLICY IF EXISTS "contact_inquiries_insert_public" ON public.contact_inquiries;
 CREATE POLICY "contact_inquiries_insert_public" ON public.contact_inquiries
   FOR INSERT WITH CHECK (true);
+
+-- 15. Permisos para roles de PostgREST (sujetos estrictamente a las políticas RLS anteriores) y recarga de caché
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+NOTIFY pgrst, 'reload schema';

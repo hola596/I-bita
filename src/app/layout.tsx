@@ -130,8 +130,14 @@ export default function RootLayout({
                 </span>
               </div>
               <a
-                href="/onboarding/anfitrion"
+                href="/dashboard/propiedades"
                 className="hidden sm:inline-flex items-center rounded-full border border-[var(--border-subtle)] px-3.5 py-1.5 text-xs font-bold hover:bg-[var(--bg-secondary)]"
+              >
+                Mis Propiedades
+              </a>
+              <a
+                href="/onboarding/anfitrion"
+                className="hidden lg:inline-flex items-center rounded-full border border-[var(--border-subtle)] px-3.5 py-1.5 text-xs font-bold hover:bg-[var(--bg-secondary)]"
               >
                 Modo Anfitrión
               </a>

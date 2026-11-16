@@ -16,7 +16,7 @@ development_status:
   epic-1-retrospective: optional
 
   epic-2: in-progress
-  2-1-alta-de-unidades-funcionales-con-fotos-optimizadas-y-cifrado-aes-256-gcm-del-pin-de-acceso: ready-for-dev
+  2-1-alta-de-unidades-funcionales-con-fotos-optimizadas-y-cifrado-aes-256-gcm-del-pin-de-acceso: done
   2-2-sincronizacion-bidireccional-de-calendarios-ical-node-ical-ical-generator-con-escudo-anti-ssrf: ready-for-dev
   2-3-micrositio-de-reserva-directa-b2b2c-p-slug-y-calculadora-tarifaria-exacta-decimal-js: ready-for-dev
   epic-2-retrospective: optional
