@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx scripts/migrate.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
     "gate:1": "tsx scripts/gates/gate-epic-1-btree-gist.ts",
     "verify:2.1": "tsx scripts/gates/verify-story-2-1.ts",
     "verify:2.3": "tsx scripts/gates/verify-story-2-3.ts",
