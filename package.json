@@ -17,7 +17,8 @@
     "verify:3.2": "tsx scripts/gates/verify-story-3-2.ts",
     "verify:3.3": "tsx scripts/gates/gate-epic-3-zero-trust-kyc.ts",
     "gate:3": "tsx scripts/gates/gate-epic-3-zero-trust-kyc.ts",
-    "verify:4.1": "tsx scripts/gates/verify-story-4-1.ts"
+    "verify:4.1": "tsx scripts/gates/verify-story-4-1.ts",
+    "verify:4.2": "tsx scripts/gates/verify-story-4-2.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",

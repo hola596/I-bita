@@ -21,15 +21,15 @@ development_status:
   2-3-micrositio-de-reserva-directa-b2b2c-p-slug-y-calculadora-tarifaria-exacta-decimal-js: done
   epic-2-retrospective: optional
 
-  epic-3: in-progress
+  epic-3: done
   3-1-configuracion-del-perfil-consorcio-friendly-y-regla-de-micro-canon-1-2: done
   3-2-flujo-movil-de-pre-check-in-con-escaner-pdf417-dni-zxing-y-auditoria-multimodal-gemini-2-5-flash: done
-  3-3-compuerta-criptografica-zero-trust-consorcial-y-emision-del-pase-digital-de-porteria-jose-qrcode: ready-for-dev
+  3-3-compuerta-criptografica-zero-trust-consorcial-y-emision-del-pase-digital-de-porteria-jose-qrcode: done
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-checkout-en-ars-con-sdk-oficial-de-mercado-pago-y-webhook-con-validacion-criptografica-hmac-sha256: ready-for-dev
-  4-2-checkout-y-custodia-escrow-en-usdt-polygon-con-verificacion-on-chain-via-viem: ready-for-dev
+  epic-4: in-progress
+  4-1-checkout-en-ars-con-sdk-oficial-de-mercado-pago-y-webhook-con-validacion-criptografica-hmac-sha256: done
+  4-2-checkout-y-custodia-escrow-en-usdt-polygon-con-verificacion-on-chain-via-viem: done
   4-3-generacion-en-servidor-y-sellado-sha-256-del-contrato-de-locacion-temporaria-art-1199-ccyc: ready-for-dev
   4-4-motor-de-libro-mayor-inmutable-ledger-entries-y-split-de-liquidacion-t-24h-anfitrion-micro-canon-consorcial: ready-for-dev
   epic-4-retrospective: optional

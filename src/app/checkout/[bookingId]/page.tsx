@@ -3,13 +3,15 @@ import { notFound, redirect } from "next/navigation";
 import { CreditCard, ShieldCheck, Lock } from "lucide-react";
 import {
   getArsCheckoutSummaryAction,
+  getUsdtCheckoutSummaryAction,
   createArsCheckoutPreferenceAction,
 } from "@/modules/payments/actions";
+import { UsdtCheckoutCard } from "@/components/booking/UsdtCheckoutCard";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Pagar reserva en pesos · Mercado Pago · I-bita",
+  title: "Pagar reserva · Motor Financiero Bi-Monetario · I-bita",
   robots: { index: false, follow: false },
 };
 
@@ -25,21 +27,65 @@ const STATUS_MESSAGES: Record<string, string> = {
   failure: "El pago no se completó. Podés intentarlo nuevamente.",
 };
 
-export default async function ArsCheckoutPage({
+export default async function CheckoutPage({
   params,
   searchParams,
 }: CheckoutPageProps) {
   const { bookingId } = await params;
   const { token, status, error } = await searchParams;
 
-  const summaryRes = await getArsCheckoutSummaryAction(bookingId, token ?? null);
-  if (!summaryRes.ok) notFound();
-  const summary = summaryRes.data;
+  // Consultar primero el resumen para determinar la moneda pactada (ARS vs USDT)
+  const arsRes = await getArsCheckoutSummaryAction(bookingId, token ?? null);
+  if (!arsRes.ok) notFound();
+  const arsSummary = arsRes.data;
 
+  // Si la reserva fue pactada en USDT, renderizar checkout on-chain en Polygon (Viem)
+  if (arsSummary.paymentCurrency === "USDT") {
+    const usdtRes = await getUsdtCheckoutSummaryAction(bookingId, token ?? null);
+    if (!usdtRes.ok) notFound();
+    const usdtSummary = usdtRes.data;
+
+    return (
+      <main className="mx-auto max-w-xl px-4 py-8 space-y-6">
+        <header className="space-y-2">
+          <span className="badge-consorcio-friendly inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-extrabold">
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            Custodia Escrow · Red Polygon (USDT)
+          </span>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            Checkout en Stablecoins
+          </h1>
+          <p className="text-sm text-[var(--text-secondary)]">
+            {usdtSummary.propertyTitle} · {usdtSummary.checkIn} al {usdtSummary.checkOut} (
+            {usdtSummary.nightsCount} noches)
+          </p>
+        </header>
+
+        <UsdtCheckoutCard
+          bookingId={usdtSummary.bookingId}
+          propertyTitle={usdtSummary.propertyTitle}
+          checkIn={usdtSummary.checkIn}
+          checkOut={usdtSummary.checkOut}
+          nightsCount={usdtSummary.nightsCount}
+          isMidTerm={usdtSummary.isMidTerm}
+          amountUsdt={usdtSummary.amountUsdt}
+          escrowDepositUsdt={usdtSummary.escrowDepositUsdt}
+          treasuryWallet={usdtSummary.treasuryWallet}
+          usdtContractAddress={usdtSummary.usdtContractAddress}
+          network={usdtSummary.network}
+          token={token ?? null}
+          payable={usdtSummary.payable}
+          status={usdtSummary.status}
+        />
+      </main>
+    );
+  }
+
+  // Flujo ARS (Mercado Pago)
   const formattedAmount = new Intl.NumberFormat("es-AR", {
     style: "currency",
     currency: "ARS",
-  }).format(Number(summary.amountArs));
+  }).format(Number(arsSummary.amountArs));
 
   async function startMercadoPagoCheckout() {
     "use server";
@@ -63,8 +109,8 @@ export default async function ArsCheckoutPage({
           Pagar tu reserva
         </h1>
         <p className="text-sm text-[var(--text-secondary)]">
-          {summary.propertyTitle} · {summary.checkIn} al {summary.checkOut} (
-          {summary.nightsCount} noches)
+          {arsSummary.propertyTitle} · {arsSummary.checkIn} al {arsSummary.checkOut} (
+          {arsSummary.nightsCount} noches)
         </p>
       </header>
 
@@ -90,12 +136,12 @@ export default async function ArsCheckoutPage({
           {formattedAmount}
         </p>
         <p className="text-xs text-[var(--text-secondary)]">
-          Pagás con QR, MODO o saldo en cuenta, o en hasta {summary.maxInstallments}{" "}
+          Pagás con QR, MODO o saldo en cuenta, o en hasta {arsSummary.maxInstallments}{" "}
           cuotas (3 y 6) según tu medio de pago. El costo financiero lo informa
           Mercado Pago antes de confirmar.
         </p>
 
-        {summary.payable ? (
+        {arsSummary.payable ? (
           <form action={startMercadoPagoCheckout}>
             <button
               type="submit"
@@ -109,7 +155,7 @@ export default async function ArsCheckoutPage({
           <p className="inline-flex items-center gap-1.5 text-sm font-bold">
             <Lock className="h-4 w-4" aria-hidden="true" />
             Esta reserva no admite pago ARS en este momento (estado{" "}
-            <code>{summary.status}</code>, moneda {summary.paymentCurrency}).
+            <code>{arsSummary.status}</code>, moneda {arsSummary.paymentCurrency}).
           </p>
         )}
       </section>

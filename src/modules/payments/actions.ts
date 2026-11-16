@@ -1,6 +1,7 @@
 "use server";
 
 import "server-only";
+import Decimal from "decimal.js";
 import { z } from "zod";
 import { Client } from "pg";
 import { env } from "@/env";
@@ -12,6 +13,14 @@ import {
   MP_MAX_INSTALLMENTS,
   type ArsPreferenceResult,
 } from "./mercadopago";
+import {
+  verifyUsdtPaymentReceipt,
+  type VerifyUsdtOptions,
+} from "./usdt-onchain";
+import {
+  createPaymentsPgClient,
+  settleApprovedUsdtPayment,
+} from "./settlement";
 
 export interface ArsCheckoutSummary {
   bookingId: string;
@@ -26,14 +35,37 @@ export interface ArsCheckoutSummary {
   maxInstallments: number;
 }
 
+export interface UsdtCheckoutSummary {
+  bookingId: string;
+  propertyTitle: string;
+  checkIn: string;
+  checkOut: string;
+  nightsCount: number;
+  isMidTerm: boolean;
+  status: string;
+  paymentCurrency: string;
+  amountUsdt: string;
+  escrowDepositUsdt: string;
+  treasuryWallet: string;
+  usdtContractAddress: string;
+  network: string;
+  chainId: number;
+  payable: boolean;
+}
+
+export interface UsdtSettlementResult {
+  bookingId: string;
+  ledgerEntryId: string;
+  bookingStatus: string;
+  txHash: string;
+  amountUsdt: string;
+}
+
 const BookingIdSchema = z.string().trim().uuid();
+const TxHashSchema = z.string().trim().regex(/^0x[a-fA-F0-9]{64}$/, "Hash de transacción Polygon inválido (0x + 64 hex)");
 
 function createPgClient(): Client {
-  return new Client({
-    connectionString: env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 15000,
-  });
+  return createPaymentsPgClient();
 }
 
 async function resolveUserId(): Promise<string | null> {
@@ -54,6 +86,8 @@ interface CheckoutBookingRow {
   status: string;
   payment_currency: string;
   total_amount: string;
+  escrow_deposit_usdt: string;
+  is_mid_term: boolean;
   check_in: string;
   check_out: string;
   nights_count: number;
@@ -61,7 +95,7 @@ interface CheckoutBookingRow {
   token_match: boolean;
 }
 
-/** Solo el huésped titular autenticado o quien posea un `invite_token` de ESA reserva puede cobrarla. */
+/** Solo el huésped titular autenticado o quien posea un `invite_token` de ESA reserva puede consultarla o cobrarla. */
 async function loadAuthorizedBooking(
   pg: Client,
   bookingId: string,
@@ -77,6 +111,8 @@ async function loadAuthorizedBooking(
     `SELECT b.id, b.guest_id, b.status::text AS status,
             b.payment_currency::text AS payment_currency,
             b.total_amount::text AS total_amount,
+            b.escrow_deposit_usdt::text AS escrow_deposit_usdt,
+            b.is_mid_term,
             b.check_in::text AS check_in, b.check_out::text AS check_out,
             b.nights_count, p.title,
             ($2::uuid IS NOT NULL AND EXISTS (
@@ -99,7 +135,7 @@ async function loadAuthorizedBooking(
     return {
       ok: false,
       code: "FORBIDDEN",
-      message: "No estás autorizado para pagar esta reserva.",
+      message: "No estás autorizado para pagar o consultar esta reserva.",
     };
   }
   return { ok: true, row };
@@ -205,6 +241,151 @@ export async function createArsCheckoutPreferenceAction(
       totalAmountArs: r.total_amount,
     });
     return { ok: true, data: preference };
+  } catch (err) {
+    return toErr(err);
+  } finally {
+    await pg.end();
+  }
+}
+
+/**
+ * Resumen del checkout USDT (red Polygon) para `/checkout/[bookingId]`.
+ * Devuelve la dirección de tesorería, el contrato oficial y los importes exactos en USDT con 6 decimales.
+ */
+export async function getUsdtCheckoutSummaryAction(
+  bookingId: string,
+  inviteToken?: string | null
+): Promise<ActionResult<UsdtCheckoutSummary>> {
+  const id = BookingIdSchema.safeParse(bookingId);
+  if (!id.success) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION_ERROR", message: "Identificador de reserva inválido." },
+    };
+  }
+  const pg = createPgClient();
+  await pg.connect();
+  try {
+    const auth = await loadAuthorizedBooking(pg, id.data, inviteToken);
+    if (!auth.ok) {
+      return { ok: false, error: { code: auth.code, message: auth.message } };
+    }
+    const r = auth.row;
+    const amountUsdt = new Decimal(r.total_amount).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toFixed(6);
+    const escrowDepositUsdt = new Decimal(r.escrow_deposit_usdt ?? "0").toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toFixed(6);
+
+    return {
+      ok: true,
+      data: {
+        bookingId: r.id,
+        propertyTitle: r.title,
+        checkIn: r.check_in,
+        checkOut: r.check_out,
+        nightsCount: Number(r.nights_count),
+        isMidTerm: Boolean(r.is_mid_term),
+        status: r.status,
+        paymentCurrency: r.payment_currency,
+        amountUsdt,
+        escrowDepositUsdt,
+        treasuryWallet: env.NEXT_PUBLIC_IBITA_TREASURY_WALLET,
+        usdtContractAddress: env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS,
+        network: "Polygon PoS",
+        chainId: 137,
+        payable: r.status === "PENDING_PAYMENT" && r.payment_currency === "USDT",
+      },
+    };
+  } catch (err) {
+    return toErr(err);
+  } finally {
+    await pg.end();
+  }
+}
+
+/**
+ * Server Action que recibe `txHash`, verifica on-chain vía Viem (`getTransactionReceipt` / `parseEventLogs`),
+ * valida el contrato oficial USDT en Polygon, el destinatario (tesorería I-bita) y el monto exacto de la reserva (`decimal.js`).
+ * Tras la verificación exitosa, inserta el asiento inmutable en `public.ledger_entries` con `idempotency_key = txHash`
+ * y transiciona atómicamente la reserva a `PAID_PENDING_KYC` (o `ALL_ADULTS_VERIFIED`).
+ */
+export async function verifyAndSettleUsdtPaymentAction(
+  bookingId: string,
+  txHash: string,
+  inviteToken?: string | null,
+  verificationOptions?: VerifyUsdtOptions
+): Promise<ActionResult<UsdtSettlementResult>> {
+  const idParsed = BookingIdSchema.safeParse(bookingId);
+  if (!idParsed.success) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION_ERROR", message: "Identificador de reserva inválido." },
+    };
+  }
+
+  const txParsed = TxHashSchema.safeParse(txHash);
+  if (!txParsed.success) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Hash de transacción inválido. Debe tener formato 0x seguido de 64 caracteres hexadecimales.",
+      },
+    };
+  }
+
+  const pg = createPgClient();
+  await pg.connect();
+  try {
+    const auth = await loadAuthorizedBooking(pg, idParsed.data, inviteToken);
+    if (!auth.ok) {
+      return { ok: false, error: { code: auth.code, message: auth.message } };
+    }
+    const r = auth.row;
+
+    if (r.status !== "PENDING_PAYMENT") {
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `La reserva no está pendiente de pago (estado: ${r.status}).`,
+        },
+      };
+    }
+
+    if (r.payment_currency !== "USDT") {
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `La reserva fue pactada en ${r.payment_currency}; utilizá la pasarela correspondiente.`,
+        },
+      };
+    }
+
+    // 1. Verificación on-chain en Polygon con Viem (estrictamente en servidor)
+    const verification = await verifyUsdtPaymentReceipt(
+      txParsed.data,
+      r.total_amount,
+      verificationOptions
+    );
+
+    // 2. Liquidación atómica en PostgreSQL/Supabase
+    const settlement = await settleApprovedUsdtPayment(
+      pg,
+      r.id,
+      verification.txHash,
+      verification.transfer
+    );
+
+    return {
+      ok: true,
+      data: {
+        bookingId: r.id,
+        ledgerEntryId: settlement.ledgerEntryId ?? "",
+        bookingStatus: settlement.bookingStatus ?? "PAID_PENDING_KYC",
+        txHash: verification.txHash,
+        amountUsdt: verification.transfer.amountUsdt,
+      },
+    };
   } catch (err) {
     return toErr(err);
   } finally {
