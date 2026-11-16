@@ -19,7 +19,10 @@ import {
 } from "./validators";
 import {
   PUBLIC_PROPERTY_COLUMNS,
+  PUBLIC_CONSORTIUM_COLUMNS,
   sanitizePublicPropertyRow,
+  sanitizePublicConsortiumConfig,
+  type PublicConsortiumConfig,
   type SafePropertyRecord,
 } from "./queries";
 
@@ -295,8 +298,31 @@ export async function listHostPropertiesAction(): Promise<
     };
   }
 
+  const propertyIds = (data ?? []).map((row) => String(row.id));
+  const consortiumByPropId = new Map<string, PublicConsortiumConfig>();
+
+  if (propertyIds.length > 0) {
+    const { data: consortiumRows } = await supabase
+      .from("consortium_configs")
+      .select(PUBLIC_CONSORTIUM_COLUMNS)
+      .in("property_id", propertyIds)
+      .eq("active", true);
+
+    for (const cRow of consortiumRows ?? []) {
+      const cleanConfig = sanitizePublicConsortiumConfig(
+        cRow as unknown as Record<string, unknown>
+      );
+      if (cleanConfig) {
+        consortiumByPropId.set(cleanConfig.property_id, cleanConfig);
+      }
+    }
+  }
+
   const rows = (data ?? []).map((row) =>
-    sanitizePublicPropertyRow(row as unknown as Record<string, unknown>)
+    sanitizePublicPropertyRow(
+      row as unknown as Record<string, unknown>,
+      consortiumByPropId.get(String(row.id)) ?? null
+    )
   );
 
   return {

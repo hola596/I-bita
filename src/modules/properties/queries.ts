@@ -50,12 +50,32 @@ export const FORBIDDEN_ACCESS_CODE_COLUMNS = [
   "accessCodePlain",
 ] as const;
 
+export const FORBIDDEN_PRIVATE_CONSORTIUM_COLUMNS = [
+  "consortium_cuit",
+  "porteria_whatsapp",
+  "admin_email",
+  "consortium_cbu_alias",
+] as const;
+
 export interface PublicConsortiumConfig {
   id: string;
   property_id: string;
   consortium_name: string;
   micro_canon_pct: number;
   active: boolean;
+}
+
+export function sanitizePublicConsortiumConfig(
+  raw: Record<string, unknown> | PublicConsortiumConfig | null | undefined
+): PublicConsortiumConfig | null {
+  if (!raw || !Boolean(raw.active)) return null;
+  return {
+    id: String(raw.id),
+    property_id: String(raw.property_id),
+    consortium_name: String(raw.consortium_name),
+    micro_canon_pct: Number(raw.micro_canon_pct ?? 0),
+    active: Boolean(raw.active),
+  };
 }
 
 export interface OccupiedDateRange {
@@ -196,8 +216,14 @@ export function sanitizePublicPropertyRow(
   for (const forbidden of FORBIDDEN_ACCESS_CODE_COLUMNS) {
     delete clone[forbidden];
   }
+  for (const forbiddenConsortium of FORBIDDEN_PRIVATE_CONSORTIUM_COLUMNS) {
+    delete clone[forbiddenConsortium];
+  }
 
   const title = String(clone.title ?? "Unidad Funcional I-bita");
+  const safeConsortium = sanitizePublicConsortiumConfig(
+    consortiumConfig as unknown as Record<string, unknown> | null | undefined
+  );
 
   return {
     id: String(clone.id),
@@ -223,7 +249,7 @@ export function sanitizePublicPropertyRow(
     created_at: String(clone.created_at ?? new Date().toISOString()),
     updated_at: String(clone.updated_at ?? new Date().toISOString()),
     hasEncryptedAccessCode: true,
-    consortium_config: consortiumConfig ?? null,
+    consortium_config: safeConsortium,
   };
 }
 
@@ -259,15 +285,9 @@ export async function getPublicPropertyBySlug(
     .eq("active", true)
     .maybeSingle();
 
-  const consortiumConfig: PublicConsortiumConfig | null = consortiumData
-    ? {
-        id: String(consortiumData.id),
-        property_id: String(consortiumData.property_id),
-        consortium_name: String(consortiumData.consortium_name),
-        micro_canon_pct: Number(consortiumData.micro_canon_pct ?? 0),
-        active: Boolean(consortiumData.active),
-      }
-    : null;
+  const consortiumConfig = sanitizePublicConsortiumConfig(
+    consortiumData as unknown as Record<string, unknown> | null
+  );
 
   return sanitizePublicPropertyRow(
     data as unknown as Record<string, unknown>,
@@ -309,7 +329,8 @@ export async function getPropertyOccupiedDateRanges(
 
 /**
  * Lista todas las Unidades Funcionales publicadas seleccionando explícitamente
- * solo las columnas descriptivas y tarifarias (`PUBLIC_PROPERTY_COLUMNS`).
+ * solo las columnas descriptivas y tarifarias (`PUBLIC_PROPERTY_COLUMNS`) y sus
+ * configuraciones públicas de consorcio (`PUBLIC_CONSORTIUM_COLUMNS`).
  */
 export async function listPublicProperties(filters?: {
   corridor?: PropertyCorridor;
@@ -327,11 +348,31 @@ export async function listPublicProperties(filters?: {
   }
 
   const { data, error } = await query;
-  if (error || !data) {
+  if (error || !data || data.length === 0) {
     return [];
   }
 
+  const propertyIds = data.map((row) => String(row.id));
+  const { data: consortiumRows } = await supabase
+    .from("consortium_configs")
+    .select(PUBLIC_CONSORTIUM_COLUMNS)
+    .in("property_id", propertyIds)
+    .eq("active", true);
+
+  const consortiumByPropId = new Map<string, PublicConsortiumConfig>();
+  for (const cRow of consortiumRows ?? []) {
+    const cleanConfig = sanitizePublicConsortiumConfig(
+      cRow as unknown as Record<string, unknown>
+    );
+    if (cleanConfig) {
+      consortiumByPropId.set(cleanConfig.property_id, cleanConfig);
+    }
+  }
+
   return data.map((row) =>
-    sanitizePublicPropertyRow(row as unknown as Record<string, unknown>)
+    sanitizePublicPropertyRow(
+      row as unknown as Record<string, unknown>,
+      consortiumByPropId.get(String(row.id)) ?? null
+    )
   );
 }

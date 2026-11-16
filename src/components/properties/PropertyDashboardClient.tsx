@@ -33,7 +33,9 @@ import {
   type PropertyImageItem,
 } from "@/modules/properties/validators";
 import type { SafePropertyRecord } from "@/modules/properties/queries";
+import type { HostConsortiumConfigRecord } from "@/modules/consortium/actions";
 import { PropertyIcalSyncPanel } from "./PropertyIcalSyncPanel";
+import { ConsortiumConfigPanel } from "./ConsortiumConfigPanel";
 
 const DEFAULT_COVER_PHOTO: PropertyImageItem = {
   url: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
@@ -67,6 +69,7 @@ const CURATED_OPTIMIZED_PHOTOS: readonly [PropertyImageItem, ...PropertyImageIte
 interface PropertyDashboardClientProps {
   initialHostProperties: SafePropertyRecord[];
   initialPublicProperties: SafePropertyRecord[];
+  initialConsortiumConfigs?: Record<string, HostConsortiumConfigRecord>;
   authenticatedEmail: string | null;
 }
 
@@ -140,6 +143,7 @@ async function optimizeImageFileToWebp(file: File): Promise<File> {
 export function PropertyDashboardClient({
   initialHostProperties,
   initialPublicProperties,
+  initialConsortiumConfigs = {},
   authenticatedEmail,
 }: PropertyDashboardClientProps) {
   const [hostProperties, setHostProperties] = useState<SafePropertyRecord[]>(
@@ -148,6 +152,9 @@ export function PropertyDashboardClient({
   const [publicProperties, setPublicProperties] = useState<SafePropertyRecord[]>(
     initialPublicProperties
   );
+  const [consortiumConfigs, setConsortiumConfigs] = useState<
+    Record<string, HostConsortiumConfigRecord>
+  >(initialConsortiumConfigs);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -880,7 +887,11 @@ export function PropertyDashboardClient({
                     <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
                       <span className="badge-consorcio-friendly inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-xs">
                         <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                        PIN Cifrado AES-256-GCM
+                        {prop.consortium_config?.active
+                          ? `Consorcio Friendly · ${Number(
+                              prop.consortium_config.micro_canon_pct
+                            ).toFixed(2)}% Canon`
+                          : "PIN Cifrado AES-256-GCM"}
                       </span>
                       <span className="rounded-full bg-black/75 text-white px-2.5 py-1 text-[11px] font-bold">
                         {prop.corridor}
@@ -949,6 +960,48 @@ export function PropertyDashboardClient({
                         Editar
                       </button>
                     </div>
+
+                    <ConsortiumConfigPanel
+                      propertyId={prop.id}
+                      propertySlug={prop.slug}
+                      propertyTitle={prop.title}
+                      addressLine={prop.address_line}
+                      baseCurrency={prop.base_currency}
+                      nightlyRate={prop.nightly_rate}
+                      monthlyDiscountPct={prop.monthly_discount_pct}
+                      absorbInstallmentsCost={prop.absorb_installments_cost}
+                      initialHostConfig={consortiumConfigs[prop.id] ?? null}
+                      publicConsortiumConfig={prop.consortium_config ?? null}
+                      onSaved={(savedConfig) => {
+                        setConsortiumConfigs((prev) => ({
+                          ...prev,
+                          [prop.id]: savedConfig,
+                        }));
+                        const updatedPublicConfig = savedConfig.active
+                          ? {
+                              id: savedConfig.id,
+                              property_id: savedConfig.property_id,
+                              consortium_name: savedConfig.consortium_name,
+                              micro_canon_pct: savedConfig.micro_canon_pct,
+                              active: savedConfig.active,
+                            }
+                          : null;
+                        setHostProperties((prev) =>
+                          prev.map((p) =>
+                            p.id === prop.id
+                              ? { ...p, consortium_config: updatedPublicConfig }
+                              : p
+                          )
+                        );
+                        setPublicProperties((prev) =>
+                          prev.map((p) =>
+                            p.id === prop.id
+                              ? { ...p, consortium_config: updatedPublicConfig }
+                              : p
+                          )
+                        );
+                      }}
+                    />
 
                     <PropertyIcalSyncPanel
                       propertyId={prop.id}
