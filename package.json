@@ -11,6 +11,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "gate:1": "tsx scripts/gates/gate-epic-1-btree-gist.ts",
     "verify:2.1": "tsx scripts/gates/verify-story-2-1.ts",
+    "verify:2.3": "tsx scripts/gates/verify-story-2-3.ts",
     "gate:2": "tsx scripts/gates/gate-epic-2-ical-ssrf.ts"
   },
   "dependencies": {

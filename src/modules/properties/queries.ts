@@ -30,10 +30,18 @@ async function getPublicSupabaseClient() {
 /**
  * Columnas estrictamente descriptivas y tarifarias de `public.properties`.
  * Excluye físicamente `access_code_ciphertext`, `access_code_iv` y `access_code_auth_tag`
- * cumpliendo con AC-2 (AD-5, NFR-4: Zero-Trust Consorcial).
+ * cumpliendo con AC-1 / AC-2 (AD-5, NFR-4: Zero-Trust Consorcial).
  */
 export const PUBLIC_PROPERTY_COLUMNS =
   "id, host_id, slug, title, description, corridor, address_line, unit_identifier, max_adults, base_currency, nightly_rate, monthly_discount_pct, absorb_installments_cost, accepts_usdt, wifi_speed_mbps, images, is_published, created_at, updated_at" as const;
+
+/**
+ * Columnas públicas de `public.consortium_configs` para mostrar la insignia
+ * "Propiedad Consorcio Friendly" y calcular el Micro-Canon Consorcial (1%–2%)
+ * sin exponer datos internos privados de administración.
+ */
+export const PUBLIC_CONSORTIUM_COLUMNS =
+  "id, property_id, consortium_name, micro_canon_pct, active" as const;
 
 export const FORBIDDEN_ACCESS_CODE_COLUMNS = [
   "access_code_ciphertext",
@@ -41,6 +49,21 @@ export const FORBIDDEN_ACCESS_CODE_COLUMNS = [
   "access_code_auth_tag",
   "accessCodePlain",
 ] as const;
+
+export interface PublicConsortiumConfig {
+  id: string;
+  property_id: string;
+  consortium_name: string;
+  micro_canon_pct: number;
+  active: boolean;
+}
+
+export interface OccupiedDateRange {
+  id: string;
+  checkIn: string;
+  checkOut: string;
+  status: string;
+}
 
 export interface SafePropertyRecord {
   id: string;
@@ -63,9 +86,39 @@ export interface SafePropertyRecord {
   created_at: string;
   updated_at: string;
   hasEncryptedAccessCode: true;
+  consortium_config?: PublicConsortiumConfig | null;
 }
 
-export function normalizePropertyImages(rawImages: unknown, fallbackTitle: string): PropertyImageItem[] {
+const DEFAULT_BENTO_FALLBACK_IMAGES: ReadonlyArray<{
+  url: string;
+  suffix: string;
+}> = [
+  {
+    url: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    suffix: "Living comedor principal con luz natural",
+  },
+  {
+    url: "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    suffix: "Dormitorio principal equipado para estadía ejecutiva",
+  },
+  {
+    url: "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    suffix: "Espacio de trabajo con Wi-Fi de fibra simétrica",
+  },
+  {
+    url: "https://images.unsplash.com/photo-1556911220-bff31c812dba?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    suffix: "Cocina integrada equipada para Media Estadía",
+  },
+  {
+    url: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    suffix: "Baño completo y detalles de categoría consorcial",
+  },
+];
+
+export function normalizePropertyImages(
+  rawImages: unknown,
+  fallbackTitle: string
+): PropertyImageItem[] {
   if (Array.isArray(rawImages) && rawImages.length > 0) {
     const validItems: PropertyImageItem[] = [];
     for (const item of rawImages) {
@@ -100,10 +153,45 @@ export function normalizePropertyImages(rawImages: unknown, fallbackTitle: strin
 }
 
 /**
+ * Construye exactamente 5 fotografías con dimensiones explícitas (`1200x900`, `CLS = 0`)
+ * para la Galería Bento estilo Airbnb Argentina en `/p/[slug]`.
+ */
+export function buildBentoGalleryImages(
+  images: PropertyImageItem[],
+  propertyTitle: string
+): [
+  PropertyImageItem,
+  PropertyImageItem,
+  PropertyImageItem,
+  PropertyImageItem,
+  PropertyImageItem,
+] {
+  const result: PropertyImageItem[] = [...images.slice(0, 5)];
+  let idx = 0;
+  while (result.length < 5) {
+    const preset =
+      DEFAULT_BENTO_FALLBACK_IMAGES[idx % DEFAULT_BENTO_FALLBACK_IMAGES.length]!;
+    result.push({
+      url: preset.url,
+      alt: `${propertyTitle} — ${preset.suffix}`,
+      width: 1200,
+      height: 900,
+      mimeType: "image/webp",
+      sizeBytes: 215000,
+    });
+    idx += 1;
+  }
+  return [result[0]!, result[1]!, result[2]!, result[3]!, result[4]!];
+}
+
+/**
  * Sanitizador defensivo que garantiza que ninguna columna criptográfica del PIN
  * viaje en respuestas generales o payloads de React Server Components.
  */
-export function sanitizePublicPropertyRow(row: Record<string, unknown>): SafePropertyRecord {
+export function sanitizePublicPropertyRow(
+  row: Record<string, unknown>,
+  consortiumConfig?: PublicConsortiumConfig | null
+): SafePropertyRecord {
   const clone = { ...row };
   for (const forbidden of FORBIDDEN_ACCESS_CODE_COLUMNS) {
     delete clone[forbidden];
@@ -135,12 +223,15 @@ export function sanitizePublicPropertyRow(row: Record<string, unknown>): SafePro
     created_at: String(clone.created_at ?? new Date().toISOString()),
     updated_at: String(clone.updated_at ?? new Date().toISOString()),
     hasEncryptedAccessCode: true,
+    consortium_config: consortiumConfig ?? null,
   };
 }
 
 /**
  * Consulta una propiedad publicada por `slug` seleccionando explícitamente
- * solo las columnas descriptivas y tarifarias (`PUBLIC_PROPERTY_COLUMNS`).
+ * solo las columnas descriptivas y tarifarias (`PUBLIC_PROPERTY_COLUMNS`) y su
+ * configuración consorcial activa (`PUBLIC_CONSORTIUM_COLUMNS`).
+ * Excluye físicamente `access_code_ciphertext`, `access_code_iv` y `access_code_auth_tag`.
  */
 export async function getPublicPropertyBySlug(
   slug: string
@@ -161,7 +252,59 @@ export async function getPublicPropertyBySlug(
     return null;
   }
 
-  return sanitizePublicPropertyRow(data as unknown as Record<string, unknown>);
+  const { data: consortiumData } = await supabase
+    .from("consortium_configs")
+    .select(PUBLIC_CONSORTIUM_COLUMNS)
+    .eq("property_id", data.id)
+    .eq("active", true)
+    .maybeSingle();
+
+  const consortiumConfig: PublicConsortiumConfig | null = consortiumData
+    ? {
+        id: String(consortiumData.id),
+        property_id: String(consortiumData.property_id),
+        consortium_name: String(consortiumData.consortium_name),
+        micro_canon_pct: Number(consortiumData.micro_canon_pct ?? 0),
+        active: Boolean(consortiumData.active),
+      }
+    : null;
+
+  return sanitizePublicPropertyRow(
+    data as unknown as Record<string, unknown>,
+    consortiumConfig
+  );
+}
+
+/**
+ * Consulta los rangos de fechas ocupadas o bloqueadas por iCal de una propiedad publicada
+ * seleccionando exclusivamente `id, check_in, check_out, status` de `public.bookings`.
+ * Jamás expone PII de huéspedes ni datos de acceso.
+ */
+export async function getPropertyOccupiedDateRanges(
+  propertyId: string
+): Promise<OccupiedDateRange[]> {
+  const cleanPropertyId = propertyId.trim();
+  if (!cleanPropertyId) return [];
+
+  const supabase = await getPublicSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select("id, check_in, check_out, status")
+    .eq("property_id", cleanPropertyId)
+    .not("status", "in", '("CANCELLED","EXPIRED")')
+    .order("check_in", { ascending: true });
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data.map((row) => ({
+    id: String(row.id),
+    checkIn: String(row.check_in),
+    checkOut: String(row.check_out),
+    status: String(row.status),
+  }));
 }
 
 /**
