@@ -99,20 +99,29 @@ export default function RootLayout({
               </span>
             </a>
 
-            {/* Search Pill Central estilo Airbnb Argentina */}
+            {/* Search Pill Central estilo Airbnb Argentina con accesos rápidos */}
             <nav
-              aria-label="Buscador rápido de estadías"
+              aria-label="Buscador rápido de estadías y módulos"
               className="hidden md:flex items-center divide-x divide-[var(--border-subtle)] rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 shadow-sm hover:shadow-md transition-shadow"
             >
-              <span className="pr-4 text-sm font-semibold">
-                Corredores Argentina
-              </span>
-              <span className="px-4 text-sm font-semibold text-[var(--brand-primary)]">
-                Por Día · Media Estadía (1–6m)
-              </span>
-              <span className="pl-4 text-sm text-[var(--text-secondary)]">
-                Consorcio Friendly
-              </span>
+              <a
+                href="/p/loft-luminoso-palermo-soho"
+                className="pr-4 text-xs font-bold text-[var(--brand-primary)] hover:underline flex items-center gap-1"
+              >
+                🏠 Propiedad Demo (Palermo)
+              </a>
+              <a
+                href="/contratos"
+                className="px-4 text-xs font-semibold hover:text-[var(--brand-primary)]"
+              >
+                📑 Contratos CCyC
+              </a>
+              <a
+                href="/checkin"
+                className="pl-4 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+              >
+                🛡️ Pre-Checkin KYC
+              </a>
             </nav>
 
             {/* Toggle Global Persistente de Moneda ARS / USDT y Accesos */}

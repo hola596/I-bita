@@ -51,8 +51,8 @@ async function runVerifyStory43() {
     generateAndSignContractAction,
     getContractDetailsAction,
     getContractDownloadSignedUrlAction,
-    CONTRACT_STORAGE_BUCKET,
   } = await import("../../src/modules/contracts/actions");
+  const { CONTRACT_STORAGE_BUCKET } = await import("../../src/modules/contracts/types");
   const { createSupabaseAdminClient } = await import("../../src/lib/supabase/admin");
 
   console.log("=== [STORY 4.3 QA] Contratos Temporarios Art. 1199 CCyC con Sellado SHA-256 ===");

@@ -13,8 +13,8 @@ import {
 import {
   generateAndSignContractAction,
   getContractDownloadSignedUrlAction,
-  type ContractRecord,
 } from "@/modules/contracts/actions";
+import { type ContractRecord } from "@/modules/contracts/types";
 
 interface ContractSignCardProps {
   bookingId: string;
