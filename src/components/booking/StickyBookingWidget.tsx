@@ -718,12 +718,22 @@ export function StickyBookingWidget({
                         ? `Adulto #1 (Titular)`
                         : `Adulto #${idx + 1} (Acompañante)`}
                     </span>
-                    <span className="truncate text-emerald-700 dark:text-emerald-400 font-bold">
-                      token: {slot.inviteToken.slice(0, 8)}… ({slot.status})
-                    </span>
+                    <a
+                      href={slot.checkinPath}
+                      className="truncate text-emerald-700 dark:text-emerald-400 font-bold underline hover:opacity-80"
+                    >
+                      Pre-Check-in ({slot.inviteToken.slice(0, 8)}…) →
+                    </a>
                   </li>
                 ))}
               </ul>
+              <a
+                href={`/checkin/${submitState.result.booking.id}`}
+                className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-700 px-3 py-2 text-xs font-extrabold text-white hover:bg-emerald-800"
+              >
+                <span>Ir al Flujo Móvil de Pre-Check-in Biométrico</span>
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </a>
             </div>
           </div>
         )}

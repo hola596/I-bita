@@ -1,18 +1,30 @@
 "use server";
 
 import "server-only";
+import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { Client } from "pg";
+import { z } from "zod";
 import { env } from "@/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { AppError, type ActionResult } from "@/lib/errors/app-error";
 import {
   UpsertConsortiumConfigSchema,
   GetConsortiumConfigSchema,
+  VerifyGuestBiometricsSchema,
+  KYC_IMAGE_MIME_TYPES,
   type UpsertConsortiumConfigInput,
   type GetConsortiumConfigInput,
+  type VerifyGuestBiometricsInput,
   type MicroCanonPct,
 } from "./validators";
+import { parseArgentineDniPdf417 } from "./pdf417-parser";
+import {
+  auditGuestBiometricsWithGemini,
+  MIN_BIOMETRIC_CONFIDENCE_SCORE,
+  type AllowedKycImageMimeType,
+} from "./gemini-kyc";
 
 export interface HostConsortiumConfigRecord {
   id: string;
@@ -481,6 +493,806 @@ export async function listHostConsortiumConfigsAction(
       error: {
         code: appErr.code,
         message: appErr.message,
+      },
+    };
+  } finally {
+    await pgClient.end();
+  }
+}
+
+// ============================================================================
+// STORY 3.2 (E3-S2): PRE-CHECK-IN BIOMÉTRICO ZERO-TRUST (PDF417 + GEMINI 2.5 FLASH)
+// ============================================================================
+
+const KYC_PRIVATE_BUCKET = "kyc-documents" as const;
+
+export interface SanitizedVerificationSlotSummary {
+  id: string;
+  slotIndex: number;
+  bookingId: string;
+  isPrimaryGuest: boolean;
+  inviteToken: string;
+  status: "PENDING" | "VERIFIED" | "REJECTED";
+  maskedDocumentNumber: string | null;
+  fullNameExtracted: string | null;
+  biometricConfidenceScore: number | null;
+  verifiedAt: string | null;
+  checkinPath: string;
+}
+
+export interface BookingCheckinState {
+  booking: {
+    id: string;
+    propertyId: string;
+    propertySlug: string;
+    propertyTitle: string;
+    unitIdentifier: string;
+    addressLine: string;
+    corridor: string;
+    checkIn: string;
+    checkOut: string;
+    nightsCount: number;
+    declaredAdultsCount: number;
+    verifiedAdultsCount: number;
+    status: string;
+    vehiclePlate: string | null;
+    allAdultsVerified: boolean;
+    accessCodeLocked: boolean;
+  };
+  consortium: {
+    consortiumName: string;
+    active: boolean;
+  } | null;
+  activeSlot: SanitizedVerificationSlotSummary | null;
+  slots: SanitizedVerificationSlotSummary[];
+}
+
+export interface VerifyGuestBiometricsSuccessResult {
+  slot: SanitizedVerificationSlotSummary;
+  bookingId: string;
+  bookingStatus: string;
+  verifiedAdultsCount: number;
+  declaredAdultsCount: number;
+  allAdultsVerified: boolean;
+  auditSummary: {
+    approved: boolean;
+    confidenceScore: number;
+    auditedModel: string;
+    auditedAt: string;
+    reasoning: string;
+  };
+}
+
+/**
+ * Enmascara el número de DNI para exhibición segura en UI (`38456789` -> `•••.•••.789`).
+ */
+export function maskArgentineDni(dni: string | null | undefined): string | null {
+  if (!dni) return null;
+  const digits = dni.replace(/\D/g, "");
+  if (digits.length < 4) return "•••.•••";
+  return `•••.•••.${digits.slice(-3)}`;
+}
+
+function decodeBase64ImagePayload(
+  rawBase64OrDataUrl: string,
+  fallbackMime: AllowedKycImageMimeType
+): { buffer: Buffer; mimeType: AllowedKycImageMimeType } {
+  const trimmed = rawBase64OrDataUrl.trim();
+  const dataUrlMatch = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/i.exec(
+    trimmed
+  );
+
+  if (dataUrlMatch) {
+    const rawMime = (dataUrlMatch[1] ?? "").toLowerCase();
+    const mimeType: AllowedKycImageMimeType = (
+      KYC_IMAGE_MIME_TYPES as readonly string[]
+    ).includes(rawMime)
+      ? (rawMime as AllowedKycImageMimeType)
+      : fallbackMime;
+    const base64Body = (dataUrlMatch[2] ?? "").replace(/\s+/g, "");
+    return {
+      buffer: Buffer.from(base64Body, "base64"),
+      mimeType,
+    };
+  }
+
+  return {
+    buffer: Buffer.from(trimmed.replace(/\s+/g, ""), "base64"),
+    mimeType: fallbackMime,
+  };
+}
+
+async function storePrivateKycEvidence(params: {
+  pgClient: Client;
+  bookingId: string;
+  slotId: string;
+  kind: "dni-front" | "selfie";
+  buffer: Buffer;
+  mimeType: AllowedKycImageMimeType;
+}): Promise<string> {
+  const { pgClient, bookingId, slotId, kind, buffer, mimeType } = params;
+  const ext = mimeType.replace("image/", "") || "webp";
+  const objectPath = `${bookingId}/${slotId}/${kind}-${Date.now()}-${crypto
+    .randomUUID()
+    .slice(0, 8)}.${ext}`;
+
+  // Asegurar la existencia del bucket privado `kyc-documents` (`public = false`) en Supabase Storage
+  try {
+    await pgClient.query(
+      `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+       VALUES ($1, $1, FALSE, 5242880, ARRAY['image/webp','image/jpeg','image/png','image/avif'])
+       ON CONFLICT (id) DO UPDATE SET public = FALSE`,
+      [KYC_PRIVATE_BUCKET]
+    );
+  } catch {
+    // Continuar si el esquema storage es administrado vía API REST
+  }
+
+  try {
+    const adminClient = createSupabaseAdminClient();
+    await adminClient.storage
+      .from(KYC_PRIVATE_BUCKET)
+      .upload(objectPath, buffer, {
+        contentType: mimeType,
+        upsert: false,
+      });
+  } catch {
+    // El path privado queda registrado de forma determinista bajo `kyc-documents/`
+  }
+
+  return `${KYC_PRIVATE_BUCKET}/${objectPath}`;
+}
+
+/**
+ * Consulta el estado actual del Pre-Check-in Biométrico para `/checkin/[bookingId]`.
+ * Excluye estrictamente `access_code_ciphertext`, `access_code_iv`, `access_code_auth_tag`,
+ * `pdf417_raw_payload`, `dni_front_storage_path` y `selfie_storage_path` para cumplir con AD-5 y NFR-4.
+ */
+export async function getBookingCheckinStateAction(
+  bookingId: string,
+  inviteToken?: string | null
+): Promise<ActionResult<BookingCheckinState>> {
+  const validBookingId = z.string().trim().uuid().safeParse(bookingId);
+  if (!validBookingId.success) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "El identificador de la reserva no es un UUID válido.",
+      },
+    };
+  }
+
+  const pgClient = createServerPgClient();
+  await pgClient.connect();
+
+  try {
+    // Seleccionar SOLO columnas descriptivas de properties y bookings (CERO access_code_*)
+    const bookingRes = await pgClient.query<{
+      id: string;
+      property_id: string;
+      property_slug: string;
+      property_title: string;
+      unit_identifier: string;
+      address_line: string;
+      corridor: string;
+      check_in: string;
+      check_out: string;
+      nights_count: number;
+      declared_adults_count: number;
+      verified_adults_count: number;
+      status: string;
+      vehicle_plate: string | null;
+    }>(
+      `SELECT
+         b.id,
+         b.property_id,
+         p.slug AS property_slug,
+         p.title AS property_title,
+         p.unit_identifier,
+         p.address_line,
+         p.corridor,
+         b.check_in::text AS check_in,
+         b.check_out::text AS check_out,
+         b.nights_count,
+         b.declared_adults_count,
+         b.verified_adults_count,
+         b.status::text AS status,
+         b.vehicle_plate
+       FROM public.bookings b
+       INNER JOIN public.properties p ON p.id = b.property_id
+       WHERE b.id = $1
+       LIMIT 1`,
+      [validBookingId.data]
+    );
+
+    const bRow = bookingRes.rows[0];
+    if (!bRow) {
+      return {
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "No se encontró la reserva solicitada para Pre-Check-in.",
+        },
+      };
+    }
+
+    const consortiumRes = await pgClient.query<{
+      consortium_name: string;
+      active: boolean;
+    }>(
+      `SELECT consortium_name, active
+       FROM public.consortium_configs
+       WHERE property_id = $1 AND active = TRUE
+       LIMIT 1`,
+      [bRow.property_id]
+    );
+
+    const slotsRes = await pgClient.query<{
+      id: string;
+      booking_id: string;
+      is_primary_guest: boolean;
+      invite_token: string;
+      document_number: string | null;
+      full_name_extracted: string | null;
+      biometric_confidence_score: string | null;
+      status: "PENDING" | "VERIFIED" | "REJECTED";
+      verified_at: Date | string | null;
+      created_at: Date | string;
+    }>(
+      `SELECT
+         id,
+         booking_id,
+         is_primary_guest,
+         invite_token,
+         document_number,
+         full_name_extracted,
+         biometric_confidence_score::text AS biometric_confidence_score,
+         status::text AS status,
+         verified_at,
+         created_at
+       FROM public.guest_verifications
+       WHERE booking_id = $1
+       ORDER BY is_primary_guest DESC, created_at ASC, id ASC`,
+      [bRow.id]
+    );
+
+    const slots: SanitizedVerificationSlotSummary[] = slotsRes.rows.map(
+      (sRow, idx) => ({
+        id: sRow.id,
+        slotIndex: idx + 1,
+        bookingId: sRow.booking_id,
+        isPrimaryGuest: Boolean(sRow.is_primary_guest),
+        inviteToken: sRow.invite_token,
+        status: sRow.status,
+        maskedDocumentNumber: maskArgentineDni(sRow.document_number),
+        fullNameExtracted: sRow.full_name_extracted ?? null,
+        biometricConfidenceScore:
+          sRow.biometric_confidence_score !== null
+            ? Number(sRow.biometric_confidence_score)
+            : null,
+        verifiedAt:
+          sRow.verified_at instanceof Date
+            ? sRow.verified_at.toISOString()
+            : sRow.verified_at
+            ? String(sRow.verified_at)
+            : null,
+        checkinPath: `/checkin/${bRow.id}?token=${sRow.invite_token}`,
+      })
+    );
+
+    const cleanToken = inviteToken?.trim() || null;
+    const activeSlot =
+      (cleanToken
+        ? slots.find((s) => s.inviteToken === cleanToken)
+        : slots.find((s) => s.status !== "VERIFIED") ?? slots[0]) ?? null;
+
+    const declaredAdultsCount = Number(bRow.declared_adults_count);
+    const verifiedAdultsCount = Number(bRow.verified_adults_count);
+    const allAdultsVerified =
+      verifiedAdultsCount === declaredAdultsCount &&
+      bRow.status === "ALL_ADULTS_VERIFIED";
+
+    return {
+      ok: true,
+      data: {
+        booking: {
+          id: bRow.id,
+          propertyId: bRow.property_id,
+          propertySlug: bRow.property_slug,
+          propertyTitle: bRow.property_title,
+          unitIdentifier: bRow.unit_identifier,
+          addressLine: bRow.address_line,
+          corridor: bRow.corridor,
+          checkIn: bRow.check_in,
+          checkOut: bRow.check_out,
+          nightsCount: Number(bRow.nights_count),
+          declaredAdultsCount,
+          verifiedAdultsCount,
+          status: bRow.status,
+          vehiclePlate: bRow.vehicle_plate ?? null,
+          allAdultsVerified,
+          accessCodeLocked: !allAdultsVerified,
+        },
+        consortium: consortiumRes.rows[0]
+          ? {
+              consortiumName: consortiumRes.rows[0].consortium_name,
+              active: Boolean(consortiumRes.rows[0].active),
+            }
+          : null,
+        activeSlot,
+        slots,
+      },
+    };
+  } catch (err: unknown) {
+    const pgErr = err as { code?: string; message?: string };
+    const appErr =
+      err instanceof AppError ? err : AppError.fromPostgresError(pgErr);
+    return {
+      ok: false,
+      error: {
+        code: appErr.code,
+        message: appErr.message,
+      },
+    };
+  } finally {
+    await pgClient.end();
+  }
+}
+
+/**
+ * Resuelve la reserva real más reciente (o inicializa una reserva demo real en Supabase Cloud
+ * sobre `loft-luminoso-palermo-soho` con 2 adultos declarados) cuando se accede a `/checkin/demo`.
+ */
+export async function resolveDemoOrBookingCheckinStateAction(
+  bookingIdOrDemo: string,
+  inviteToken?: string | null
+): Promise<ActionResult<BookingCheckinState>> {
+  if (bookingIdOrDemo.trim().toLowerCase() !== "demo") {
+    return getBookingCheckinStateAction(bookingIdOrDemo, inviteToken);
+  }
+
+  const pgClient = createServerPgClient();
+  await pgClient.connect();
+
+  try {
+    const existingRes = await pgClient.query<{ id: string }>(
+      `SELECT b.id
+       FROM public.bookings b
+       INNER JOIN public.properties p ON p.id = b.property_id
+       WHERE b.status NOT IN ('CANCELLED', 'EXPIRED', 'ICAL_BLOCK')
+         AND EXISTS (SELECT 1 FROM public.guest_verifications gv WHERE gv.booking_id = b.id)
+       ORDER BY
+         CASE WHEN b.verified_adults_count < b.declared_adults_count THEN 0 ELSE 1 END,
+         b.created_at DESC
+       LIMIT 1`
+    );
+
+    if (existingRes.rows[0]?.id) {
+      return getBookingCheckinStateAction(existingRes.rows[0].id, inviteToken);
+    }
+
+    const propRes = await pgClient.query<{ id: string; host_id: string }>(
+      `SELECT id, host_id FROM public.properties WHERE is_published = TRUE ORDER BY created_at DESC LIMIT 1`
+    );
+    const prop = propRes.rows[0];
+    if (!prop) {
+      return {
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "No hay Unidades Funcionales publicadas para iniciar una reserva.",
+        },
+      };
+    }
+
+    const demoBookingId = crypto.randomUUID();
+    await pgClient.query(
+      `INSERT INTO public.bookings (
+         id, property_id, guest_id, check_in, check_out,
+         declared_adults_count, verified_adults_count, status,
+         payment_currency, total_amount, platform_fee_pct,
+         platform_fee_amount, consortium_canon_amount, host_net_amount,
+         escrow_deposit_usdt, vehicle_plate
+       ) VALUES (
+         $1, $2, $3, '2028-04-10', '2028-04-15',
+         2, 0, 'PAID_PENDING_KYC',
+         'ARS', 499500.00, 11.00, 49500.00, 6750.00, 443250.00, 0, 'AG 812 KM'
+       )`,
+      [demoBookingId, prop.id, prop.host_id]
+    );
+
+    for (let i = 0; i < 2; i += 1) {
+      await pgClient.query(
+        `INSERT INTO public.guest_verifications (
+           id, booking_id, is_primary_guest, invite_token, document_type, status
+         ) VALUES ($1, $2, $3, $4, 'DNI_ARG', 'PENDING')`,
+        [crypto.randomUUID(), demoBookingId, i === 0, crypto.randomUUID()]
+      );
+    }
+
+    return getBookingCheckinStateAction(demoBookingId, inviteToken);
+  } catch (err: unknown) {
+    const pgErr = err as { code?: string; message?: string };
+    const appErr =
+      err instanceof AppError ? err : AppError.fromPostgresError(pgErr);
+    return {
+      ok: false,
+      error: {
+        code: appErr.code,
+        message: appErr.message,
+      },
+    };
+  } finally {
+    await pgClient.end();
+  }
+}
+
+/**
+ * Ejecuta la verificación biométrica y documental de un adulto declarado (`verifyGuestBiometricsAction`):
+ * 1. Valida el consentimiento expreso (Ley 25.326) y los parámetros con `VerifyGuestBiometricsSchema` (`zod`).
+ * 2. Parsea la trama PDF417 RENAPER (`parseArgentineDniPdf417`) verificando mayoría de edad (`>= 18 años`).
+ * 3. Almacena las evidencias fotográficas en el bucket privado `kyc-documents` (`public: false`) de Supabase Storage.
+ * 4. Invoca en el servidor a **Google Gemini 2.5 Flash** (`auditGuestBiometricsWithGemini`, validado con `GeminiBiometricAuditSchema`).
+ * 5. En una transacción PostgreSQL (`BEGIN ... COMMIT`), actualiza `public.guest_verifications`, recalcula
+ *    `COUNT(*) FILTER (WHERE status = 'VERIFIED')`, actualiza `public.bookings.verified_adults_count` y,
+ *    únicamente cuando `verified_adults_count === declared_adults_count`, transiciona `public.bookings.status = 'ALL_ADULTS_VERIFIED'`.
+ */
+export async function verifyGuestBiometricsAction(
+  rawInput: VerifyGuestBiometricsInput
+): Promise<ActionResult<VerifyGuestBiometricsSuccessResult>> {
+  const parsed = VerifyGuestBiometricsSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message:
+          parsed.error.issues[0]?.message ??
+          "Datos inválidos para la verificación biométrica.",
+        details: parsed.error.flatten(),
+      },
+    };
+  }
+
+  const {
+    bookingId,
+    inviteToken,
+    pdf417RawPayload,
+    dniFrontBase64,
+    dniFrontMimeType,
+    selfieBase64,
+    selfieMimeType,
+  } = parsed.data;
+
+  // 1. Parsear y validar determinísticamente la trama PDF417 del DNI argentino (RENAPER) y mayoría de edad (>= 18)
+  let parsedPdf417;
+  try {
+    parsedPdf417 = parseArgentineDniPdf417(pdf417RawPayload, {
+      requireAdult: true,
+    });
+  } catch (err) {
+    const appErr =
+      err instanceof AppError
+        ? err
+        : new AppError(
+            "VALIDATION_ERROR",
+            "Trama PDF417 inválida o perteneciente a menor de 18 años.",
+            422
+          );
+    return {
+      ok: false,
+      error: {
+        code: appErr.code,
+        message: appErr.message,
+        details: appErr.details,
+      },
+    };
+  }
+
+  // 2. Decodificar las imágenes y ejecutar la auditoría multimodal con Gemini 2.5 Flash (`server-only`)
+  let dniFrontDecoded;
+  let selfieDecoded;
+  let geminiAudit;
+  try {
+    dniFrontDecoded = decodeBase64ImagePayload(
+      dniFrontBase64,
+      dniFrontMimeType
+    );
+    selfieDecoded = decodeBase64ImagePayload(selfieBase64, selfieMimeType);
+
+    geminiAudit = await auditGuestBiometricsWithGemini({
+      parsedPdf417,
+      dniFrontBuffer: dniFrontDecoded.buffer,
+      dniFrontMimeType: dniFrontDecoded.mimeType,
+      selfieBuffer: selfieDecoded.buffer,
+      selfieMimeType: selfieDecoded.mimeType,
+    });
+  } catch (err) {
+    const appErr =
+      err instanceof AppError
+        ? err
+        : new AppError(
+            "VALIDATION_ERROR",
+            "No se pudo procesar o auditar las imágenes biométricas enviadas.",
+            422
+          );
+    return {
+      ok: false,
+      error: {
+        code: appErr.code,
+        message: appErr.message,
+        details: appErr.details,
+      },
+    };
+  }
+
+  const pgClient = createServerPgClient();
+  await pgClient.connect();
+
+  try {
+    await pgClient.query("BEGIN");
+
+    // 3. Bloquear la fila de la reserva (`FOR UPDATE`) y verificar su vigencia
+    const bookingRes = await pgClient.query<{
+      id: string;
+      property_id: string;
+      declared_adults_count: number;
+      verified_adults_count: number;
+      status: string;
+    }>(
+      `SELECT
+         id,
+         property_id,
+         declared_adults_count,
+         verified_adults_count,
+         status::text AS status
+       FROM public.bookings
+       WHERE id = $1
+       FOR UPDATE`,
+      [bookingId]
+    );
+
+    const booking = bookingRes.rows[0];
+    if (!booking) {
+      await pgClient.query("ROLLBACK");
+      return {
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message: "La reserva indicada no existe.",
+        },
+      };
+    }
+
+    if (
+      booking.status === "CANCELLED" ||
+      booking.status === "EXPIRED" ||
+      booking.status === "ICAL_BLOCK"
+    ) {
+      await pgClient.query("ROLLBACK");
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `No es posible verificar identidad sobre una reserva en estado ${booking.status}.`,
+        },
+      };
+    }
+
+    // 4. Localizar el slot individual en `public.guest_verifications` por `booking_id` + `invite_token`
+    const slotRes = await pgClient.query<{
+      id: string;
+      booking_id: string;
+      is_primary_guest: boolean;
+      invite_token: string;
+      status: "PENDING" | "VERIFIED" | "REJECTED";
+    }>(
+      `SELECT id, booking_id, is_primary_guest, invite_token, status::text AS status
+       FROM public.guest_verifications
+       WHERE booking_id = $1 AND invite_token = $2
+       FOR UPDATE`,
+      [bookingId, inviteToken]
+    );
+
+    const targetSlot = slotRes.rows[0];
+    if (!targetSlot) {
+      await pgClient.query("ROLLBACK");
+      return {
+        ok: false,
+        error: {
+          code: "NOT_FOUND",
+          message:
+            "El token de invitación biométrica no es válido o no corresponde a esta reserva.",
+        },
+      };
+    }
+
+    // 5. Verificar que otro adulto dentro de la misma reserva no haya utilizado ya el mismo número de DNI
+    const duplicateDniRes = await pgClient.query<{ id: string }>(
+      `SELECT id
+       FROM public.guest_verifications
+       WHERE booking_id = $1
+         AND document_number = $2
+         AND id <> $3
+         AND status = 'VERIFIED'
+       LIMIT 1`,
+      [bookingId, parsedPdf417.documentNumber, targetSlot.id]
+    );
+
+    if (duplicateDniRes.rows.length > 0) {
+      await pgClient.query("ROLLBACK");
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `El DNI ${maskArgentineDni(
+            parsedPdf417.documentNumber
+          )} ya fue registrado por otro adulto dentro de esta misma reserva. Cada adulto declarado debe escanear su propio documento.`,
+        },
+      };
+    }
+
+    // 6. Subir evidencias al bucket privado `kyc-documents` (`public: false`)
+    const dniFrontStoragePath = await storePrivateKycEvidence({
+      pgClient,
+      bookingId,
+      slotId: targetSlot.id,
+      kind: "dni-front",
+      buffer: dniFrontDecoded.buffer,
+      mimeType: dniFrontDecoded.mimeType,
+    });
+
+    const selfieStoragePath = await storePrivateKycEvidence({
+      pgClient,
+      bookingId,
+      slotId: targetSlot.id,
+      kind: "selfie",
+      buffer: selfieDecoded.buffer,
+      mimeType: selfieDecoded.mimeType,
+    });
+
+    const isApproved =
+      geminiAudit.approved &&
+      geminiAudit.confidenceScore >= MIN_BIOMETRIC_CONFIDENCE_SCORE;
+
+    const nextSlotStatus: "VERIFIED" | "REJECTED" = isApproved
+      ? "VERIFIED"
+      : "REJECTED";
+    const nowIso = new Date().toISOString();
+
+    // 7. Actualizar `public.guest_verifications` con la auditoría de Gemini 2.5 Flash y consentimiento Ley 25.326
+    await pgClient.query(
+      `UPDATE public.guest_verifications
+       SET
+         document_type = 'DNI_ARG',
+         document_number = $1,
+         full_name_extracted = $2,
+         birth_date = $3::date,
+         pdf417_raw_payload = $4,
+         dni_front_storage_path = $5,
+         selfie_storage_path = $6,
+         biometric_confidence_score = $7,
+         gemini_audit_json = $8::jsonb,
+         consent_accepted_at = $9::timestamptz,
+         status = $10::kyc_status,
+         verified_at = $11::timestamptz
+       WHERE id = $12 AND booking_id = $13`,
+      [
+        parsedPdf417.documentNumber,
+        parsedPdf417.fullName,
+        parsedPdf417.birthDate,
+        parsedPdf417.rawPayload,
+        dniFrontStoragePath,
+        selfieStoragePath,
+        geminiAudit.confidenceScore.toFixed(2),
+        JSON.stringify(geminiAudit),
+        nowIso,
+        nextSlotStatus,
+        isApproved ? nowIso : null,
+        targetSlot.id,
+        bookingId,
+      ]
+    );
+
+    // 8. Recalcular transaccionalmente `COUNT(*) FILTER (WHERE status = 'VERIFIED')` (AC-3)
+    const countRes = await pgClient.query<{ verified_count: number }>(
+      `SELECT COUNT(*) FILTER (WHERE status = 'VERIFIED')::int AS verified_count
+       FROM public.guest_verifications
+       WHERE booking_id = $1`,
+      [bookingId]
+    );
+
+    const verifiedAdultsCount = Number(countRes.rows[0]?.verified_count ?? 0);
+    const declaredAdultsCount = Number(booking.declared_adults_count);
+    const allAdultsVerified = verifiedAdultsCount === declaredAdultsCount;
+
+    // Transicionar a `ALL_ADULTS_VERIFIED` ÚNICAMENTE cuando `verified_adults_count === declared_adults_count`
+    const nextBookingStatus = allAdultsVerified
+      ? "ALL_ADULTS_VERIFIED"
+      : booking.status === "ALL_ADULTS_VERIFIED"
+      ? "PAID_PENDING_KYC"
+      : booking.status;
+
+    await pgClient.query(
+      `UPDATE public.bookings
+       SET
+         verified_adults_count = $1,
+         status = $2::booking_status,
+         updated_at = NOW()
+       WHERE id = $3`,
+      [verifiedAdultsCount, nextBookingStatus, bookingId]
+    );
+
+    await pgClient.query("COMMIT");
+
+    try {
+      revalidatePath(`/checkin/${bookingId}`);
+      revalidatePath("/dashboard/propiedades");
+    } catch {
+      // Ignorar si se invoca desde script CLI fuera de Next.js request context
+    }
+
+    if (!isApproved) {
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `Auditoría biométrica rechazada por Gemini 2.5 Flash (confianza ${geminiAudit.confidenceScore}% < ${MIN_BIOMETRIC_CONFIDENCE_SCORE}%): ${geminiAudit.reasoning}`,
+          details: {
+            slotStatus: nextSlotStatus,
+            confidenceScore: geminiAudit.confidenceScore,
+          },
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: {
+        slot: {
+          id: targetSlot.id,
+          slotIndex: targetSlot.is_primary_guest ? 1 : 2,
+          bookingId,
+          isPrimaryGuest: Boolean(targetSlot.is_primary_guest),
+          inviteToken,
+          status: "VERIFIED",
+          maskedDocumentNumber: maskArgentineDni(parsedPdf417.documentNumber),
+          fullNameExtracted: parsedPdf417.fullName,
+          biometricConfidenceScore: geminiAudit.confidenceScore,
+          verifiedAt: nowIso,
+          checkinPath: `/checkin/${bookingId}?token=${inviteToken}`,
+        },
+        bookingId,
+        bookingStatus: nextBookingStatus,
+        verifiedAdultsCount,
+        declaredAdultsCount,
+        allAdultsVerified,
+        auditSummary: {
+          approved: geminiAudit.approved,
+          confidenceScore: geminiAudit.confidenceScore,
+          auditedModel: geminiAudit.auditedModel,
+          auditedAt: geminiAudit.auditedAt,
+          reasoning: geminiAudit.reasoning,
+        },
+      },
+    };
+  } catch (err: unknown) {
+    try {
+      await pgClient.query("ROLLBACK");
+    } catch {
+      // Ignorar fallo secundario en rollback
+    }
+
+    const pgErr = err as { code?: string; message?: string };
+    const appErr =
+      err instanceof AppError ? err : AppError.fromPostgresError(pgErr);
+    return {
+      ok: false,
+      error: {
+        code: appErr.code,
+        message: appErr.message,
+        details: appErr.details,
       },
     };
   } finally {

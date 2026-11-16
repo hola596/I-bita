@@ -121,3 +121,52 @@ export type UpsertConsortiumConfigOutput = z.output<
   typeof UpsertConsortiumConfigSchema
 >;
 export type GetConsortiumConfigInput = z.input<typeof GetConsortiumConfigSchema>;
+
+export const KYC_IMAGE_MIME_TYPES = [
+  "image/webp",
+  "image/jpeg",
+  "image/png",
+  "image/avif",
+] as const;
+
+export const VerifyGuestBiometricsSchema = z.object({
+  bookingId: z
+    .string()
+    .trim()
+    .uuid("El ID de la reserva debe ser un UUID válido."),
+  inviteToken: z
+    .string()
+    .trim()
+    .uuid("El token de invitación de Pre-Check-in debe ser un UUID válido."),
+  consentAccepted: z.literal(true, {
+    errorMap: () => ({
+      message:
+        "Debés aceptar expresamente el Consentimiento Informado de Validación Biométrica (Ley 25.326 de Protección de Datos Personales).",
+    }),
+  }),
+  pdf417RawPayload: z
+    .string()
+    .trim()
+    .min(
+      20,
+      "La lectura del código de barras PDF417 del dorso del DNI es obligatoria."
+    )
+    .max(600, "La trama PDF417 excede la longitud máxima permitida."),
+  dniFrontBase64: z
+    .string()
+    .trim()
+    .min(32, "La fotografía del frente del DNI es obligatoria."),
+  dniFrontMimeType: z.enum(KYC_IMAGE_MIME_TYPES).default("image/webp"),
+  selfieBase64: z
+    .string()
+    .trim()
+    .min(32, "La captura de selfie en vivo es obligatoria."),
+  selfieMimeType: z.enum(KYC_IMAGE_MIME_TYPES).default("image/webp"),
+});
+
+export type VerifyGuestBiometricsInput = z.input<
+  typeof VerifyGuestBiometricsSchema
+>;
+export type VerifyGuestBiometricsOutput = z.output<
+  typeof VerifyGuestBiometricsSchema
+>;
