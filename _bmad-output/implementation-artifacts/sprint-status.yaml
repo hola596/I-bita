@@ -30,7 +30,7 @@ development_status:
   epic-4: in-progress
   4-1-checkout-en-ars-con-sdk-oficial-de-mercado-pago-y-webhook-con-validacion-criptografica-hmac-sha256: done
   4-2-checkout-y-custodia-escrow-en-usdt-polygon-con-verificacion-on-chain-via-viem: done
-  4-3-generacion-en-servidor-y-sellado-sha-256-del-contrato-de-locacion-temporaria-art-1199-ccyc: ready-for-dev
+  4-3-generacion-en-servidor-y-sellado-sha-256-del-contrato-de-locacion-temporaria-art-1199-ccyc: done
   4-4-motor-de-libro-mayor-inmutable-ledger-entries-y-split-de-liquidacion-t-24h-anfitrion-micro-canon-consorcial: ready-for-dev
   epic-4-retrospective: optional
 
