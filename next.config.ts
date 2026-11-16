@@ -10,7 +10,7 @@ const cspHeader = [
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.mercadopago.com https://polygon-bor-rpc.publicnode.com https://generativelanguage.googleapis.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  "form-action 'self' https://*.mercadopago.com.ar https://*.mercadopago.com",
 ].join("; ");
 
 const nextConfig: NextConfig = {

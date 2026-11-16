@@ -734,6 +734,15 @@ export function StickyBookingWidget({
                 <span>Ir al Flujo Móvil de Pre-Check-in Biométrico</span>
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
               </a>
+              {submitState.result.booking.paymentCurrency === "ARS" && (
+                <a
+                  href={`/checkout/${submitState.result.booking.id}?token=${submitState.result.guestVerifications[0]?.inviteToken ?? ""}`}
+                  className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-sky-800 px-3 py-2 text-xs font-extrabold text-white hover:bg-sky-900"
+                >
+                  <span>Pagar en pesos con Mercado Pago</span>
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
+              )}
             </div>
           </div>
         )}
