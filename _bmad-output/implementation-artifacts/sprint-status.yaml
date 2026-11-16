@@ -1,0 +1,43 @@
+# Sprint Status — I-bita
+# Generado y validado mediante Readiness Gate (PASS)
+
+generated: 11-16-2026 03:16
+last_updated: 11-16-2026 03:16
+project: I-bita
+project_key: IBITA
+tracking_system: file-system
+story_location: "docs/epics"
+
+development_status:
+  epic-1: in-progress
+  1-1-inicializacion-de-nextjs-validacion-fail-fast-t3-oss-env-nextjs-y-migracion-sql-btree-gist-en-supabase-cloud: done
+  1-2-autenticacion-multi-rol-con-supabase-ssr-y-onboarding-fiscal-web3-del-anfitrion: ready-for-dev
+  1-3-layout-inspirado-en-airbnb-argentina-modulo-legal-automatico-y-contacto-seguro: ready-for-dev
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-alta-de-unidades-funcionales-con-fotos-optimizadas-y-cifrado-aes-256-gcm-del-pin-de-acceso: ready-for-dev
+  2-2-sincronizacion-bidireccional-de-calendarios-ical-node-ical-ical-generator-con-escudo-anti-ssrf: ready-for-dev
+  2-3-micrositio-de-reserva-directa-b2b2c-p-slug-y-calculadora-tarifaria-exacta-decimal-js: ready-for-dev
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-configuracion-del-perfil-consorcio-friendly-y-regla-de-micro-canon-1-2: ready-for-dev
+  3-2-flujo-movil-de-pre-check-in-con-escaner-pdf417-dni-zxing-y-auditoria-multimodal-gemini-2-5-flash: ready-for-dev
+  3-3-compuerta-criptografica-zero-trust-consorcial-y-emision-del-pase-digital-de-porteria-jose-qrcode: ready-for-dev
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-checkout-en-ars-con-sdk-oficial-de-mercado-pago-y-webhook-con-validacion-criptografica-hmac-sha256: ready-for-dev
+  4-2-checkout-y-custodia-escrow-en-usdt-polygon-con-verificacion-on-chain-via-viem: ready-for-dev
+  4-3-generacion-en-servidor-y-sellado-sha-256-del-contrato-de-locacion-temporaria-art-1199-ccyc: ready-for-dev
+  4-4-motor-de-libro-mayor-inmutable-ledger-entries-y-split-de-liquidacion-t-24h-anfitrion-micro-canon-consorcial: ready-for-dev
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-home-y-buscador-del-marketplace-b2c-inspirado-en-airbnb-argentina-switch-por-dia-vs-media-estadia: ready-for-dev
+  5-2-seo-tecnico-marcado-estructurado-schema-org-json-ld-geo-aeo-sitemap-xml-y-robots-txt: ready-for-dev
+  5-3-dashboard-integral-del-anfitrion-exportador-regulatorio-csv-pdf-rpatt-arca-y-auditoria-final-zero-simulation: ready-for-dev
+  epic-5-retrospective: optional
+
+action_items: []

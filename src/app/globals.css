@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  /* Paleta Light Mode — Contraste WCAG 2.1 AAA inspirado en Airbnb Argentina + Identidad I-bita */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f7;
+  --bg-elevated: #ffffff;
+  --text-primary: #141414;
+  --text-secondary: #4a4a4a;
+  --border-subtle: #dddddd;
+
+  /* Acento Principal I-bita (Coral / Terracota Argentino accesible) */
+  --brand-primary: #d90b38;
+  --brand-primary-hover: #b8072d;
+
+  /* Diferencial 1: Sello Consorcio Friendly / Portería Verificada (Verde Esmeralda AAA) */
+  --badge-consorcio-bg: #e6f6ec;
+  --badge-consorcio-text: #064e24;
+  --badge-consorcio-border: #0d8a42;
+
+  /* Diferencial 2: Motor Bi-Monetario (ARS Cuotas Mercado Pago / USDT Polygon) */
+  --badge-ars-bg: #e0f2fe;
+  --badge-ars-text: #074166;
+  --badge-usdt-bg: #dcfce7;
+  --badge-usdt-text: #064e3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #0f1115;
+    --bg-secondary: #181b22;
+    --bg-elevated: #1e222b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --border-subtle: #2a2e39;
+
+    --brand-primary: #ff385c;
+    --brand-primary-hover: #ff5a76;
+
+    --badge-consorcio-bg: #052e16;
+    --badge-consorcio-text: #86efac;
+    --badge-consorcio-border: #22c55e;
+
+    --badge-ars-bg: #082f49;
+    --badge-ars-text: #7dd3fc;
+    --badge-usdt-bg: #064e3b;
+    --badge-usdt-text: #6ee7b7;
+  }
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Skip Link accesible por teclado (WCAG 2.1 AAA) */
+.skip-to-content {
+  position: absolute;
+  top: -100px;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.75rem 1.25rem;
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+  font-weight: 700;
+  border-radius: 0.5rem;
+  text-decoration: none;
+  transition: top 0.15s ease-in-out;
+}
+
+.skip-to-content:focus {
+  top: 1rem;
+  outline: 3px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+/* Badge oficial Consorcio Friendly / Portería Verificada */
+.badge-consorcio-friendly {
+  background-color: var(--badge-consorcio-bg);
+  color: var(--badge-consorcio-text);
+  border: 1px solid var(--badge-consorcio-border);
+}
