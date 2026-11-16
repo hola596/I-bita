@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { env } from "@/env";
+import { CookieConsentBanner } from "@/components/layout/CookieConsentBanner";
 import "./globals.css";
 
 const jakarta = Plus_Jakarta_Sans({
@@ -114,7 +115,7 @@ export default function RootLayout({
               </span>
             </nav>
 
-            {/* Toggle Global Persistente de Moneda ARS / USDT */}
+            {/* Toggle Global Persistente de Moneda ARS / USDT y Accesos */}
             <div className="flex items-center gap-3">
               <div
                 role="group"
@@ -128,6 +129,18 @@ export default function RootLayout({
                   USDT ₮ (Polygon)
                 </span>
               </div>
+              <a
+                href="/onboarding/anfitrion"
+                className="hidden sm:inline-flex items-center rounded-full border border-[var(--border-subtle)] px-3.5 py-1.5 text-xs font-bold hover:bg-[var(--bg-secondary)]"
+              >
+                Modo Anfitrión
+              </a>
+              <a
+                href="/login"
+                className="inline-flex items-center rounded-full bg-[var(--brand-primary)] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[var(--brand-primary-hover)]"
+              >
+                Ingresar
+              </a>
             </div>
           </div>
         </header>
@@ -144,13 +157,23 @@ export default function RootLayout({
             <p className="font-medium">
               © {new Date().getFullYear()} I-bita Argentina — Alquileres Temporarios y Media Estadía (CCyC Art. 1199 · Ley 25.326).
             </p>
-            <div className="flex items-center gap-4 font-semibold">
+            <div className="flex flex-wrap items-center gap-4 font-semibold">
+              <a href="/legal/privacidad" className="hover:underline">
+                Privacidad Biométrica
+              </a>
+              <a href="/legal/terminos" className="hover:underline">
+                Términos CCyC
+              </a>
+              <a href="/contacto" className="hover:underline">
+                Contacto Seguro
+              </a>
               <span className="badge-consorcio-friendly rounded-full px-3 py-1 text-xs">
                 ✓ Zero-Trust Consorcial Activo
               </span>
             </div>
           </div>
         </footer>
+        <CookieConsentBanner />
       </body>
     </html>
   );

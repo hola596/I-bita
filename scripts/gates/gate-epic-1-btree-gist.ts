@@ -26,8 +26,36 @@ function loadEnvLocal() {
 async function runGateEpic1() {
   loadEnvLocal();
   const { env } = await import("../../src/env");
+  const { HostOnboardingSchema } = await import("../../src/modules/auth/validators");
 
   console.log("=== [GATE EPIC 1] Starting Zero-Simulation Verification ===");
+
+  // 0. Verify Story 1.2 Host Onboarding Validators (CUIT Modulo 11, CBU 22 digits, Viem EIP-55 Checksum)
+  const validOnboarding = HostOnboardingSchema.safeParse({
+    fullName: "Martín Gómez",
+    phoneWhatsapp: "+5491145678901",
+    cuitCuil: "20-12345678-6", // Valid Modulo 11 CUIT
+    payoutCbuCvu: "0000003100012345678901",
+    payoutUsdtWallet: "0x223c27263ef7d49491031e6cda3feaf2690dd1f7",
+    payoutSplitArsPct: 70,
+  });
+  if (!validOnboarding.success) {
+    throw new Error(`Valid onboarding failed: ${JSON.stringify(validOnboarding.error.issues)}`);
+  }
+  const invalidCuit = HostOnboardingSchema.safeParse({
+    fullName: "Martín Gómez",
+    phoneWhatsapp: "+5491145678901",
+    cuitCuil: "20-12345678-0", // Invalid Modulo 11 check digit
+    payoutCbuCvu: "0000003100012345678901",
+    payoutUsdtWallet: "0x223c27263ef7d49491031e6cda3feaf2690dd1f7",
+    payoutSplitArsPct: 70,
+  });
+  if (invalidCuit.success) {
+    throw new Error("Invalid Modulo 11 CUIT was not rejected!");
+  }
+  console.log(
+    `[OK] Story 1.2 Validators verified -> CUIT Modulo 11 OK, CBU 22d OK, Viem EIP-55 Checksum=${validOnboarding.data.payoutUsdtWallet}`
+  );
 
   // 1. Verify AES-256-GCM with 12B IV, 16B AuthTag and propertyId AAD binding
   const key = Buffer.from(env.ACCESS_CODE_ENCRYPTION_KEY, "hex");
