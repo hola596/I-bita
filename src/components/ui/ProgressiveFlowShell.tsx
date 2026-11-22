@@ -22,6 +22,8 @@ export interface ProgressiveFlowShellProps {
   canGoNext?: boolean;
   onNext?: () => void;
   nextLabel?: string;
+  allowInvalidNextClick?: boolean;
+  footerAlertSlot?: ReactNode;
   submitButtonLabel?: string;
   isSubmitting?: boolean;
   submittingLabel?: string;
@@ -57,6 +59,8 @@ export function ProgressiveFlowShell({
   canGoNext = true,
   onNext,
   nextLabel = "Siguiente",
+  allowInvalidNextClick = false,
+  footerAlertSlot,
   submitButtonLabel,
   isSubmitting = false,
   submittingLabel = "Guardando...",
@@ -151,6 +155,8 @@ export function ProgressiveFlowShell({
       {/* Barra segmentada inferior y navegación limpia */}
       {!hideFooter && (
         <div className="border-t border-[var(--border-subtle)] pt-5 space-y-4">
+          {footerAlertSlot}
+
           <div
             role="progressbar"
             aria-label="Avance paso a paso"
@@ -198,8 +204,13 @@ export function ProgressiveFlowShell({
             <button
               type={onNext ? "button" : "submit"}
               onClick={onNext}
-              disabled={!canGoNext || isSubmitting}
-              className="btn-primary-3d inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-6 text-sm font-extrabold disabled:opacity-45"
+              disabled={isSubmitting || (!allowInvalidNextClick && !canGoNext)}
+              aria-disabled={!canGoNext || isSubmitting}
+              className={`btn-primary-3d inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-6 text-sm font-extrabold disabled:opacity-45 ${
+                allowInvalidNextClick && !canGoNext && !isSubmitting
+                  ? "opacity-80"
+                  : ""
+              }`.trim()}
             >
               {isSubmitting ? (
                 <>

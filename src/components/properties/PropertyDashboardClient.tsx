@@ -38,6 +38,13 @@ import {
   type PropertyCurrency,
   type PropertyImageItem,
 } from "@/modules/properties/validators";
+import {
+  validateAllPropertyWizardSteps,
+  validatePropertyWizardStep,
+  type PropertyWizardValidationValues,
+  type WizardFieldIssue,
+  type WizardFieldKey,
+} from "@/modules/properties/wizard-validation";
 import type {
   OccupiedDateRange,
   SafePropertyRecord,
@@ -243,6 +250,37 @@ async function optimizeImageFileToWebp(file: File): Promise<File> {
   });
 }
 
+const INVALID_INPUT_CLASS =
+  "border-red-600 focus:border-red-600 bg-red-50/40 dark:bg-red-950/20";
+
+function FieldErrorHint({
+  issue,
+  id,
+}: {
+  issue?: WizardFieldIssue;
+  id: string;
+}) {
+  if (!issue) return null;
+  return (
+    <div
+      id={id}
+      role="alert"
+      className="mt-1.5 flex items-start gap-2 rounded-xl border border-red-600/35 bg-red-50 px-3 py-2 text-xs text-red-950 dark:bg-red-950/35 dark:text-red-200"
+    >
+      <AlertCircle
+        className="h-4 w-4 shrink-0 mt-0.5 text-red-700 dark:text-red-300"
+        aria-hidden="true"
+      />
+      <div className="space-y-0.5 leading-snug">
+        <p className="font-extrabold">{issue.problem}</p>
+        <p className="font-semibold">
+          <span className="underline">Qué hacer:</span> {issue.action}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function PropertyDashboardClient({
   initialHostProperties,
   initialPublicProperties,
@@ -289,9 +327,10 @@ export function PropertyDashboardClient({
   const [unitIdentifier, setUnitIdentifier] = useState("");
   const [maxAdults, setMaxAdults] = useState<number>(2);
   const [baseCurrency, setBaseCurrency] = useState<PropertyCurrency>("USD");
-  const [nightlyRate, setNightlyRate] = useState<number>(65);
-  const [monthlyDiscountPct, setMonthlyDiscountPct] = useState<number>(20);
-  const [wifiSpeedMbps, setWifiSpeedMbps] = useState<number>(300);
+  const [nightlyRateInput, setNightlyRateInput] = useState<string>("65");
+  const [monthlyDiscountInput, setMonthlyDiscountInput] =
+    useState<string>("20");
+  const [wifiSpeedInput, setWifiSpeedInput] = useState<string>("300");
   const [absorbInstallmentsCost, setAbsorbInstallmentsCost] = useState(true);
   const [acceptsUsdt, setAcceptsUsdt] = useState(true);
   const [accessCodePlain, setAccessCodePlain] = useState("");
@@ -301,6 +340,13 @@ export function PropertyDashboardClient({
   const [images, setImages] = useState<PropertyImageItem[]>([
     CURATED_OPTIMIZED_PHOTOS[0],
   ]);
+
+  const [touchedFields, setTouchedFields] = useState<
+    Partial<Record<WizardFieldKey, boolean>>
+  >({});
+  const [attemptedSteps, setAttemptedSteps] = useState<Record<number, boolean>>(
+    {}
+  );
 
   const [photoAltInput, setPhotoAltInput] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -315,8 +361,25 @@ export function PropertyDashboardClient({
     savedSlug?: string;
   }>({ type: "idle" });
 
+  function markTouched(key: WizardFieldKey) {
+    setTouchedFields((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+  }
+
+  function focusWizardField(fieldId: string) {
+    if (typeof window === "undefined") return;
+    requestAnimationFrame(() => {
+      const el = document.getElementById(fieldId);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (typeof (el as HTMLElement).focus === "function") {
+        (el as HTMLElement).focus({ preventScroll: true });
+      }
+    });
+  }
+
   function handleTitleChange(val: string) {
     setTitle(val);
+    markTouched("title");
     if (!slugManuallyEdited && !editingId) {
       setSlug(slugifyPropertyTitle(val));
     }
@@ -333,14 +396,16 @@ export function PropertyDashboardClient({
     setUnitIdentifier(prop.unit_identifier);
     setMaxAdults(prop.max_adults);
     setBaseCurrency(prop.base_currency);
-    setNightlyRate(prop.nightly_rate);
-    setMonthlyDiscountPct(prop.monthly_discount_pct);
-    setWifiSpeedMbps(prop.wifi_speed_mbps ?? 300);
+    setNightlyRateInput(String(prop.nightly_rate));
+    setMonthlyDiscountInput(String(prop.monthly_discount_pct));
+    setWifiSpeedInput(String(prop.wifi_speed_mbps ?? 300));
     setAbsorbInstallmentsCost(prop.absorb_installments_cost);
     setAcceptsUsdt(prop.accepts_usdt);
     setAccessCodePlain("");
     setMidTermPolicy(normalizeMidTermPolicy(prop.mid_term_policy));
     setImages(prop.images.length > 0 ? prop.images : [CURATED_OPTIMIZED_PHOTOS[0]]);
+    setTouchedFields({});
+    setAttemptedSteps({});
     setFormStatus({ type: "idle" });
     setWizardDirection("forward");
     setWizardStep(0);
@@ -358,35 +423,62 @@ export function PropertyDashboardClient({
     setUnitIdentifier("");
     setMaxAdults(2);
     setBaseCurrency("USD");
-    setNightlyRate(65);
-    setMonthlyDiscountPct(20);
-    setWifiSpeedMbps(300);
+    setNightlyRateInput("65");
+    setMonthlyDiscountInput("20");
+    setWifiSpeedInput("300");
     setAbsorbInstallmentsCost(true);
     setAcceptsUsdt(true);
     setAccessCodePlain("");
     setMidTermPolicy(cloneDefaultMidTermPolicy());
     setImages([CURATED_OPTIMIZED_PHOTOS[0]]);
+    setTouchedFields({});
+    setAttemptedSteps({});
     setShowSlugEditor(false);
   }
 
-  const stepValidations: readonly boolean[] = [
-    addressLine.trim().length >= 5 && unitIdentifier.trim().length >= 1,
-    title.trim().length >= 5 &&
-      slug.trim().length >= 3 &&
-      description.trim().length >= 20 &&
-      maxAdults >= 1,
-    Number(nightlyRate) > 0 &&
-      Number(monthlyDiscountPct) >= 15 &&
-      Number(monthlyDiscountPct) <= 50,
-    midTermPolicy.approvalMode !== "HOST_APPROVAL_INTERVIEW" ||
-      midTermPolicy.interviewChannels.length >= 1,
-    images.length >= 1,
-    Boolean(editingId) || accessCodePlain.trim().length >= 4,
-  ];
+  const wizardValidationValues: PropertyWizardValidationValues = {
+    addressLine,
+    unitIdentifier,
+    title,
+    slug,
+    description,
+    maxAdults,
+    wifiSpeedInput,
+    baseCurrency,
+    nightlyRateInput,
+    monthlyDiscountInput,
+    midTermPolicy,
+    imagesCount: images.length,
+    accessCodePlain,
+    isEditing: Boolean(editingId),
+  };
+
+  const currentStepIssues = validatePropertyWizardStep(
+    wizardStep,
+    wizardValidationValues
+  );
+  const isCurrentStepValid = currentStepIssues.length === 0;
+  const visibleStepIssues = currentStepIssues.filter(
+    (issue) =>
+      Boolean(attemptedSteps[wizardStep]) ||
+      Boolean(touchedFields[issue.fieldKey]) ||
+      Boolean(issue.isOutOfRangeOrMalformed)
+  );
+  const getVisibleIssue = (key: WizardFieldKey): WizardFieldIssue | undefined =>
+    visibleStepIssues.find((issue) => issue.fieldKey === key);
 
   function handleWizardNext() {
     if (wizardStep >= WIZARD_STEP_META.length - 1) return;
-    if (!stepValidations[wizardStep]) return;
+    if (currentStepIssues.length > 0) {
+      setAttemptedSteps((prev) => ({ ...prev, [wizardStep]: true }));
+      const first = currentStepIssues[0]!;
+      if (currentStepIssues.some((issue) => issue.fieldKey === "slug")) {
+        setShowSlugEditor(true);
+      }
+      notify(`Revisá ${first.fieldLabel}: ${first.action}`, "info", "shield");
+      focusWizardField(first.fieldId);
+      return;
+    }
     setFormStatus({ type: "idle" });
     setWizardDirection("forward");
     setWizardStep((s) => Math.min(s + 1, WIZARD_STEP_META.length - 1));
@@ -468,6 +560,30 @@ export function PropertyDashboardClient({
       return;
     }
 
+    const allCheck = validateAllPropertyWizardSteps(wizardValidationValues);
+    if (allCheck.firstInvalidStep !== null) {
+      const targetStep = allCheck.firstInvalidStep;
+      const stepIssues = allCheck.issuesByStep[targetStep] ?? [];
+      setAttemptedSteps((prev) => ({ ...prev, [targetStep]: true }));
+      if (stepIssues.some((issue) => issue.fieldKey === "slug")) {
+        setShowSlugEditor(true);
+      }
+      if (targetStep !== wizardStep) {
+        setWizardDirection(targetStep < wizardStep ? "backward" : "forward");
+        setWizardStep(targetStep);
+      }
+      const first = stepIssues[0];
+      if (first) {
+        notify(`Revisá ${first.fieldLabel}: ${first.action}`, "info", "shield");
+        focusWizardField(first.fieldId);
+      }
+      return;
+    }
+
+    const parsedNightlyRate = Number(nightlyRateInput);
+    const parsedMonthlyDiscount = Number(monthlyDiscountInput);
+    const parsedWifiSpeed = Number(wifiSpeedInput);
+
     setFormStatus({ type: "loading" });
 
     if (editingId) {
@@ -481,9 +597,9 @@ export function PropertyDashboardClient({
         unit_identifier: unitIdentifier,
         max_adults: Number(maxAdults),
         base_currency: baseCurrency,
-        nightly_rate: Number(nightlyRate),
-        monthly_discount_pct: Number(monthlyDiscountPct),
-        wifi_speed_mbps: Number(wifiSpeedMbps),
+        nightly_rate: parsedNightlyRate,
+        monthly_discount_pct: parsedMonthlyDiscount,
+        wifi_speed_mbps: parsedWifiSpeed,
         absorb_installments_cost: absorbInstallmentsCost,
         accepts_usdt: acceptsUsdt,
         midTermPolicy,
@@ -524,9 +640,9 @@ export function PropertyDashboardClient({
       unit_identifier: unitIdentifier,
       max_adults: Number(maxAdults),
       base_currency: baseCurrency,
-      nightly_rate: Number(nightlyRate),
-      monthly_discount_pct: Number(monthlyDiscountPct),
-      wifi_speed_mbps: Number(wifiSpeedMbps),
+      nightly_rate: parsedNightlyRate,
+      monthly_discount_pct: parsedMonthlyDiscount,
+      wifi_speed_mbps: parsedWifiSpeed,
       absorb_installments_cost: absorbInstallmentsCost,
       accepts_usdt: acceptsUsdt,
       midTermPolicy,
@@ -558,6 +674,62 @@ export function PropertyDashboardClient({
   const enabledReqCount = midTermPolicy.requirements.filter(
     (r) => r.enabled
   ).length;
+
+  const addressIssue = getVisibleIssue("addressLine");
+  const unitIssue = getVisibleIssue("unitIdentifier");
+  const titleIssue = getVisibleIssue("title");
+  const slugIssue = getVisibleIssue("slug");
+  const descriptionIssue = getVisibleIssue("description");
+  const maxAdultsIssue = getVisibleIssue("maxAdults");
+  const wifiIssue = getVisibleIssue("wifiSpeedMbps");
+  const rateIssue = getVisibleIssue("nightlyRate");
+  const discountIssue = getVisibleIssue("monthlyDiscountPct");
+  const channelsIssue = getVisibleIssue("midTermInterviewChannels");
+  const imagesIssue = getVisibleIssue("images");
+  const pinIssue = getVisibleIssue("accessCodePlain");
+
+  const wizardFooterAlert =
+    visibleStepIssues.length > 0 ? (
+      <div
+        role="alert"
+        aria-live="polite"
+        className="rounded-2xl border border-red-600/40 bg-red-50 p-4 text-xs text-red-950 dark:bg-red-950/35 dark:text-red-200 space-y-2"
+      >
+        <div className="flex items-center gap-2 font-extrabold">
+          <AlertCircle
+            className="h-4 w-4 shrink-0 text-red-700 dark:text-red-300"
+            aria-hidden="true"
+          />
+          <span>
+            Antes de continuar, corregí{" "}
+            {visibleStepIssues.length === 1
+              ? "este dato"
+              : `estos ${visibleStepIssues.length} datos`}
+            :
+          </span>
+        </div>
+        <ul className="space-y-1.5 pl-1">
+          {visibleStepIssues.map((issue) => (
+            <li key={issue.fieldKey} className="leading-snug">
+              <button
+                type="button"
+                onClick={() => {
+                  if (issue.fieldKey === "slug") {
+                    setShowSlugEditor(true);
+                  }
+                  focusWizardField(issue.fieldId);
+                }}
+                className="font-extrabold underline hover:text-[var(--brand-primary)] cursor-pointer text-left"
+              >
+                {issue.fieldLabel}:
+              </button>{" "}
+              <span className="font-semibold">{issue.problem}</span>{" "}
+              <span>{issue.action}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : undefined;
 
   return (
     <div className="space-y-8">
@@ -683,7 +855,9 @@ export function PropertyDashboardClient({
               }
               canGoBack={wizardStep > 0}
               onBack={handleWizardBack}
-              canGoNext={Boolean(stepValidations[wizardStep])}
+              canGoNext={isCurrentStepValid}
+              allowInvalidNextClick
+              footerAlertSlot={wizardFooterAlert}
               onNext={
                 wizardStep < WIZARD_STEP_META.length - 1
                   ? handleWizardNext
@@ -703,21 +877,51 @@ export function PropertyDashboardClient({
               {/* PASO 0: DIRECCIÓN Y ZONA (ESTILO AIRBNB) */}
               {wizardStep === 0 && (
                 <div className="space-y-4">
-                  <div className="relative">
-                    <MapPin
-                      className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--brand-primary)]"
-                      aria-hidden="true"
-                    />
-                    <input
-                      id="prop-address"
-                      name="addressLine"
-                      type="text"
-                      required
-                      minLength={5}
-                      value={addressLine}
-                      onChange={(e) => setAddressLine(e.target.value)}
-                      placeholder="Ingresá tu dirección (ej: Thames 1845, Palermo)"
-                      className="min-h-[54px] w-full rounded-full border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] pl-12 pr-5 py-3 text-sm sm:text-base font-semibold focus:border-[var(--brand-primary)] focus:outline-none"
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="prop-address"
+                        className="text-xs font-extrabold"
+                      >
+                        Dirección física (calle y altura) *
+                      </label>
+                      <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        {addressLine.trim().length}/5 mín.
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <MapPin
+                        className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--brand-primary)]"
+                        aria-hidden="true"
+                      />
+                      <input
+                        id="prop-address"
+                        name="addressLine"
+                        type="text"
+                        required
+                        minLength={5}
+                        maxLength={200}
+                        value={addressLine}
+                        onChange={(e) => {
+                          setAddressLine(e.target.value);
+                          markTouched("addressLine");
+                        }}
+                        onBlur={() => markTouched("addressLine")}
+                        aria-invalid={Boolean(addressIssue)}
+                        aria-describedby={
+                          addressIssue ? "prop-address-error" : undefined
+                        }
+                        placeholder="Ingresá tu dirección (ej: Thames 1845, Palermo)"
+                        className={`min-h-[54px] w-full rounded-full border-2 bg-[var(--bg-primary)] pl-12 pr-5 py-3 text-sm sm:text-base font-semibold focus:outline-none ${
+                          addressIssue
+                            ? INVALID_INPUT_CLASS
+                            : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                        }`}
+                      />
+                    </div>
+                    <FieldErrorHint
+                      issue={addressIssue}
+                      id="prop-address-error"
                     />
                   </div>
 
@@ -733,11 +937,23 @@ export function PropertyDashboardClient({
                       name="unitIdentifier"
                       type="text"
                       required
+                      maxLength={40}
                       value={unitIdentifier}
-                      onChange={(e) => setUnitIdentifier(e.target.value)}
+                      onChange={(e) => {
+                        setUnitIdentifier(e.target.value);
+                        markTouched("unitIdentifier");
+                      }}
+                      onBlur={() => markTouched("unitIdentifier")}
+                      aria-invalid={Boolean(unitIssue)}
+                      aria-describedby={unitIssue ? "prop-unit-error" : undefined}
                       placeholder="Ej: Piso 4 Depto B"
-                      className="min-h-[48px] w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold"
+                      className={`min-h-[48px] w-full rounded-2xl border bg-[var(--bg-primary)] px-4 text-sm font-semibold focus:outline-none ${
+                        unitIssue
+                          ? `border-2 ${INVALID_INPUT_CLASS}`
+                          : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                      }`}
                     />
+                    <FieldErrorHint issue={unitIssue} id="prop-unit-error" />
                   </div>
 
                   <div className="space-y-2">
@@ -772,12 +988,17 @@ export function PropertyDashboardClient({
               {wizardStep === 1 && (
                 <div className="space-y-4">
                   <div>
-                    <label
-                      htmlFor="prop-title"
-                      className="block text-xs font-extrabold mb-1.5"
-                    >
-                      Título de tu alojamiento *
-                    </label>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="prop-title"
+                        className="text-xs font-extrabold"
+                      >
+                        Título de tu alojamiento *
+                      </label>
+                      <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        {title.trim().length}/5 mín.
+                      </span>
+                    </div>
                     <input
                       id="prop-title"
                       name="title"
@@ -787,9 +1008,19 @@ export function PropertyDashboardClient({
                       maxLength={140}
                       value={title}
                       onChange={(e) => handleTitleChange(e.target.value)}
+                      onBlur={() => markTouched("title")}
+                      aria-invalid={Boolean(titleIssue)}
+                      aria-describedby={
+                        titleIssue ? "prop-title-error" : undefined
+                      }
                       placeholder="Ej: Studio Luminoso Palermo Soho"
-                      className="min-h-[50px] w-full rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold"
+                      className={`min-h-[50px] w-full rounded-2xl border-2 bg-[var(--bg-primary)] px-4 text-sm font-semibold focus:outline-none ${
+                        titleIssue
+                          ? INVALID_INPUT_CLASS
+                          : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                      }`}
                     />
+                    <FieldErrorHint issue={titleIssue} id="prop-title-error" />
                   </div>
 
                   <div>
@@ -798,11 +1029,11 @@ export function PropertyDashboardClient({
                       onClick={() => setShowSlugEditor((p) => !p)}
                       className="text-xs font-bold text-[var(--brand-primary)] underline cursor-pointer"
                     >
-                      {showSlugEditor
+                      {showSlugEditor || Boolean(slugIssue)
                         ? "Ocultar enlace personalizado"
                         : `Enlace directo: /p/${slug || "tu-anuncio"} (personalizar)`}
                     </button>
-                    {showSlugEditor && (
+                    {(showSlugEditor || Boolean(slugIssue)) && (
                       <div className="mt-2">
                         <input
                           id="prop-slug"
@@ -814,79 +1045,154 @@ export function PropertyDashboardClient({
                           value={slug}
                           onChange={(e) => {
                             setSlugManuallyEdited(true);
+                            markTouched("slug");
                             setSlug(slugifyPropertyTitle(e.target.value));
                           }}
+                          onBlur={() => markTouched("slug")}
+                          aria-invalid={Boolean(slugIssue)}
+                          aria-describedby={
+                            slugIssue ? "prop-slug-error" : undefined
+                          }
                           placeholder="studio-luminoso-palermo-soho"
-                          className="min-h-[44px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-xs font-mono"
+                          className={`min-h-[44px] w-full rounded-xl border bg-[var(--bg-primary)] px-3.5 text-xs font-mono focus:outline-none ${
+                            slugIssue
+                              ? `border-2 ${INVALID_INPUT_CLASS}`
+                              : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                          }`}
                         />
+                        <FieldErrorHint issue={slugIssue} id="prop-slug-error" />
                       </div>
                     )}
                   </div>
 
                   <div>
-                    <label
-                      htmlFor="prop-description"
-                      className="block text-xs font-extrabold mb-1.5"
-                    >
-                      Contanos qué tiene y cómo es la convivencia (mín. 20 letras) *
-                    </label>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <label
+                        htmlFor="prop-description"
+                        className="text-xs font-extrabold"
+                      >
+                        Contanos qué tiene y cómo es la convivencia (mín. 20 letras) *
+                      </label>
+                      <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                        {description.trim().length}/20 mín.
+                      </span>
+                    </div>
                     <textarea
                       id="prop-description"
                       name="description"
                       required
                       minLength={20}
+                      maxLength={4000}
                       rows={3}
                       value={description}
-                      onChange={(e) => setDescription(e.target.value)}
+                      onChange={(e) => {
+                        setDescription(e.target.value);
+                        markTouched("description");
+                      }}
+                      onBlur={() => markTouched("description")}
+                      aria-invalid={Boolean(descriptionIssue)}
+                      aria-describedby={
+                        descriptionIssue ? "prop-description-error" : undefined
+                      }
                       placeholder="Departamento equipado para estadías cortas y largas (1 a 6 meses). Edificio tranquilo y Wi-Fi de alta velocidad."
-                      className="w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5 text-sm"
+                      className={`w-full rounded-2xl border bg-[var(--bg-primary)] p-3.5 text-sm focus:outline-none ${
+                        descriptionIssue
+                          ? `border-2 ${INVALID_INPUT_CLASS}`
+                          : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                      }`}
+                    />
+                    <FieldErrorHint
+                      issue={descriptionIssue}
+                      id="prop-description-error"
                     />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2">
-                      <span className="text-xs font-extrabold">
-                        Adultos máx.
-                      </span>
-                      <div className="inline-flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setMaxAdults((n) => Math.max(1, n - 1))}
-                          aria-label="Restar un adulto"
-                          className="h-8 w-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] inline-flex items-center justify-center font-extrabold cursor-pointer"
-                        >
-                          <Minus className="h-3.5 w-3.5" aria-hidden="true" />
-                        </button>
-                        <span className="w-6 text-center text-sm font-black">
-                          {maxAdults}
+                    <div>
+                      <div
+                        id="prop-max-adults"
+                        tabIndex={-1}
+                        className={`rounded-2xl border bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 ${
+                          maxAdultsIssue
+                            ? `border-2 ${INVALID_INPUT_CLASS}`
+                            : "border-[var(--border-subtle)]"
+                        }`}
+                      >
+                        <span className="text-xs font-extrabold">
+                          Adultos máx.
                         </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setMaxAdults((n) => Math.min(20, n + 1))
-                          }
-                          aria-label="Sumar un adulto"
-                          className="h-8 w-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] inline-flex items-center justify-center font-extrabold cursor-pointer"
-                        >
-                          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                        </button>
+                        <div className="inline-flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMaxAdults((n) => Math.max(1, n - 1));
+                              markTouched("maxAdults");
+                            }}
+                            aria-label="Restar un adulto"
+                            className="h-8 w-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] inline-flex items-center justify-center font-extrabold cursor-pointer"
+                          >
+                            <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                          <span className="w-6 text-center text-sm font-black">
+                            {maxAdults}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMaxAdults((n) => Math.min(20, n + 1));
+                              markTouched("maxAdults");
+                            }}
+                            aria-label="Sumar un adulto"
+                            className="h-8 w-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] inline-flex items-center justify-center font-extrabold cursor-pointer"
+                          >
+                            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
                       </div>
+                      <FieldErrorHint
+                        issue={maxAdultsIssue}
+                        id="prop-max-adults-error"
+                      />
                     </div>
 
-                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2">
-                      <label htmlFor="prop-wifi" className="text-xs font-extrabold">
-                        Wi-Fi (Mbps)
-                      </label>
-                      <input
-                        id="prop-wifi"
-                        name="wifiSpeedMbps"
-                        type="number"
-                        min={1}
-                        max={10000}
-                        value={wifiSpeedMbps}
-                        onChange={(e) => setWifiSpeedMbps(Number(e.target.value))}
-                        className="w-24 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-sm font-bold text-right"
-                      />
+                    <div>
+                      <div
+                        className={`rounded-2xl border bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 ${
+                          wifiIssue
+                            ? `border-2 ${INVALID_INPUT_CLASS}`
+                            : "border-[var(--border-subtle)]"
+                        }`}
+                      >
+                        <label
+                          htmlFor="prop-wifi"
+                          className="text-xs font-extrabold"
+                        >
+                          Wi-Fi (Mbps)
+                        </label>
+                        <input
+                          id="prop-wifi"
+                          name="wifiSpeedMbps"
+                          type="number"
+                          min={1}
+                          max={10000}
+                          value={wifiSpeedInput}
+                          onChange={(e) => {
+                            setWifiSpeedInput(e.target.value);
+                            markTouched("wifiSpeedMbps");
+                          }}
+                          onBlur={() => markTouched("wifiSpeedMbps")}
+                          aria-invalid={Boolean(wifiIssue)}
+                          aria-describedby={
+                            wifiIssue ? "prop-wifi-error" : undefined
+                          }
+                          className={`w-24 rounded-xl border bg-[var(--bg-primary)] px-2.5 py-1.5 text-sm font-bold text-right focus:outline-none ${
+                            wifiIssue
+                              ? "border-red-600 focus:border-red-600"
+                              : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                          }`}
+                        />
+                      </div>
+                      <FieldErrorHint issue={wifiIssue} id="prop-wifi-error" />
                     </div>
                   </div>
                 </div>
@@ -933,10 +1239,23 @@ export function PropertyDashboardClient({
                         min={1}
                         step="0.01"
                         required
-                        value={nightlyRate}
-                        onChange={(e) => setNightlyRate(Number(e.target.value))}
-                        className="min-h-[52px] w-full rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-lg font-black"
+                        value={nightlyRateInput}
+                        onChange={(e) => {
+                          setNightlyRateInput(e.target.value);
+                          markTouched("nightlyRate");
+                        }}
+                        onBlur={() => markTouched("nightlyRate")}
+                        aria-invalid={Boolean(rateIssue)}
+                        aria-describedby={
+                          rateIssue ? "prop-rate-error" : undefined
+                        }
+                        className={`min-h-[52px] w-full rounded-2xl border-2 bg-[var(--bg-primary)] px-4 text-lg font-black focus:outline-none ${
+                          rateIssue
+                            ? INVALID_INPUT_CLASS
+                            : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                        }`}
                       />
+                      <FieldErrorHint issue={rateIssue} id="prop-rate-error" />
                     </div>
 
                     <div>
@@ -953,12 +1272,50 @@ export function PropertyDashboardClient({
                         min={15}
                         max={50}
                         required
-                        value={monthlyDiscountPct}
-                        onChange={(e) =>
-                          setMonthlyDiscountPct(Number(e.target.value))
+                        value={monthlyDiscountInput}
+                        onChange={(e) => {
+                          setMonthlyDiscountInput(e.target.value);
+                          markTouched("monthlyDiscountPct");
+                        }}
+                        onBlur={() => markTouched("monthlyDiscountPct")}
+                        aria-invalid={Boolean(discountIssue)}
+                        aria-describedby={
+                          discountIssue ? "prop-discount-error" : undefined
                         }
-                        className="min-h-[52px] w-full rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-lg font-black"
+                        className={`min-h-[52px] w-full rounded-2xl border-2 bg-[var(--bg-primary)] px-4 text-lg font-black focus:outline-none ${
+                          discountIssue
+                            ? INVALID_INPUT_CLASS
+                            : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                        }`}
                       />
+                      <FieldErrorHint
+                        issue={discountIssue}
+                        id="prop-discount-error"
+                      />
+                      {discountIssue && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-bold text-[var(--text-secondary)]">
+                            Ajuste rápido:
+                          </span>
+                          {[
+                            { val: "15", label: "Usar 15% (mínimo)" },
+                            { val: "20", label: "Usar 20% (recomendado)" },
+                            { val: "50", label: "Usar 50% (máximo)" },
+                          ].map((chip) => (
+                            <button
+                              key={chip.val}
+                              type="button"
+                              onClick={() => {
+                                setMonthlyDiscountInput(chip.val);
+                                markTouched("monthlyDiscountPct");
+                              }}
+                              className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] font-extrabold text-[var(--text-primary)] hover:border-[var(--brand-primary)] hover:text-[var(--brand-primary)] cursor-pointer transition-colors"
+                            >
+                              {chip.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -990,10 +1347,23 @@ export function PropertyDashboardClient({
 
               {/* PASO 3: ESTADÍAS LARGAS (1 A 6 MESES) */}
               {wizardStep === 3 && (
-                <MidTermPolicyEditor
-                  value={midTermPolicy}
-                  onChange={setMidTermPolicy}
-                />
+                <div
+                  id="prop-midterm-channels"
+                  tabIndex={-1}
+                  className="space-y-3"
+                >
+                  <MidTermPolicyEditor
+                    value={midTermPolicy}
+                    onChange={(next) => {
+                      setMidTermPolicy(next);
+                      markTouched("midTermInterviewChannels");
+                    }}
+                  />
+                  <FieldErrorHint
+                    issue={channelsIssue}
+                    id="prop-midterm-channels-error"
+                  />
+                </div>
               )}
 
               {/* PASO 4: FOTOGRAFÍAS DEL ESPACIO */}
@@ -1066,6 +1436,11 @@ export function PropertyDashboardClient({
                     </p>
                   )}
 
+                  <FieldErrorHint
+                    issue={imagesIssue}
+                    id="photo-file-input-error"
+                  />
+
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {images.map((img, idx) => (
                       <div
@@ -1103,7 +1478,13 @@ export function PropertyDashboardClient({
               {/* PASO 5: CLAVE RESGUARDADA Y PUBLICACIÓN */}
               {wizardStep === 5 && (
                 <div className="space-y-4">
-                  <div className="rounded-2xl border-2 border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/40 p-4 space-y-2.5">
+                  <div
+                    className={`rounded-2xl border-2 p-4 space-y-2.5 ${
+                      pinIssue
+                        ? INVALID_INPUT_CLASS
+                        : "border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/40"
+                    }`}
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label
                         htmlFor="prop-pin"
@@ -1128,14 +1509,25 @@ export function PropertyDashboardClient({
                       minLength={4}
                       maxLength={240}
                       value={accessCodePlain}
-                      onChange={(e) => setAccessCodePlain(e.target.value)}
+                      onChange={(e) => {
+                        setAccessCodePlain(e.target.value);
+                        markTouched("accessCodePlain");
+                      }}
+                      onBlur={() => markTouched("accessCodePlain")}
+                      aria-invalid={Boolean(pinIssue)}
+                      aria-describedby={pinIssue ? "prop-pin-error" : undefined}
                       placeholder={
                         editingId
                           ? "Dejá en blanco para conservar la clave actual o escribí una nueva..."
                           : "Ej: PIN Cerradura #8492* — Llave en portería"
                       }
-                      className="min-h-[48px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-sm font-mono"
+                      className={`min-h-[48px] w-full rounded-xl border bg-[var(--bg-primary)] px-3.5 text-sm font-mono focus:outline-none ${
+                        pinIssue
+                          ? "border-red-600 focus:border-red-600"
+                          : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                      }`}
                     />
+                    <FieldErrorHint issue={pinIssue} id="prop-pin-error" />
                   </div>
 
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-1.5 text-xs">
@@ -1146,8 +1538,12 @@ export function PropertyDashboardClient({
                       <strong>{title}</strong> · {addressLine} ({unitIdentifier})
                     </p>
                     <p className="text-[var(--text-secondary)]">
-                      Tarifa: <strong>{nightlyRate} {baseCurrency}/noche</strong>{" "}
-                      (-{monthlyDiscountPct}% mensual) · Estadías 1–6 meses:{" "}
+                      Tarifa:{" "}
+                      <strong>
+                        {nightlyRateInput || "0"} {baseCurrency}/noche
+                      </strong>{" "}
+                      (-{monthlyDiscountInput || "0"}% mensual) · Estadías 1–6
+                      meses:{" "}
                       <strong>
                         {midTermPolicy.approvalMode === "HOST_APPROVAL_INTERVIEW"
                           ? "Con entrevista previa"
