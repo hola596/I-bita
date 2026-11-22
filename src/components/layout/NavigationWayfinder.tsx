@@ -274,7 +274,7 @@ export function NavigationWayfinder() {
 
   return (
     <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70">
-      <div className="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 space-y-3">
+      <div className="mx-auto max-w-7xl px-4 py-2.5 sm:px-6 sm:py-3 lg:px-8 space-y-2.5 sm:space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 min-w-0">
             <button
@@ -322,7 +322,7 @@ export function NavigationWayfinder() {
 
           <Link
             href={meta.parentHref}
-            className="text-xs font-bold text-[var(--brand-primary)] hover:underline whitespace-nowrap"
+            className="hidden sm:inline-block text-xs font-bold text-[var(--brand-primary)] hover:underline whitespace-nowrap"
           >
             {meta.parentLabel}
           </Link>
@@ -331,12 +331,12 @@ export function NavigationWayfinder() {
         {/* Guía visual de 4 etapas en el recorrido de reserva */}
         {meta.journeyStep && (
           <nav aria-label="Pasos de tu reserva">
-            <ol className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            <ol className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5 sm:grid sm:grid-cols-2 lg:grid-cols-4 sm:overflow-visible sm:pb-0">
               {journeySteps.map((item) => {
                 const isDone = item.step < meta.journeyStep!;
                 const isCurrent = item.step === meta.journeyStep;
                 return (
-                  <li key={item.step}>
+                  <li key={item.step} className="shrink-0 sm:shrink">
                     <Link
                       href={item.href}
                       aria-current={isCurrent ? "step" : undefined}

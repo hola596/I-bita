@@ -9,6 +9,7 @@ interface PropertyLocationMapTileProps {
   addressLine: string;
   corridorLabel: string;
   mapData: PropertyLocationMapData;
+  className?: string;
 }
 
 /**
@@ -20,6 +21,7 @@ export function PropertyLocationMapTile({
   addressLine,
   corridorLabel,
   mapData,
+  className = "",
 }: PropertyLocationMapTileProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -46,7 +48,7 @@ export function PropertyLocationMapTile({
     <>
       <div
         id="mapa-ubicacion"
-        className="relative aspect-[4/3] w-full overflow-hidden bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-2xl md:rounded-none"
+        className={`relative aspect-[4/3] w-full overflow-hidden bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-2xl md:rounded-none ${className}`.trim()}
       >
         <iframe
           src={mapData.embedUrl}

@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
+  ArrowDown,
   ArrowRight,
   ArrowUpRight,
   CalendarDays,
@@ -28,6 +29,7 @@ import {
 import { Icon3D } from "@/components/ui/Icon3D";
 import { AchievementBanner } from "@/components/ui/AchievementBanner";
 import { ProgressiveDisclosure } from "@/components/ui/ProgressiveDisclosure";
+import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
 import type { PublicHomePropertySummary } from "@/app/page";
 import { CORRIDOR_LABELS } from "@/modules/properties/validators";
@@ -373,9 +375,9 @@ export function HomeExperienceClient({
               className="absolute inset-0 bg-gradient-to-b from-slate-950/75 via-slate-950/60 to-slate-950/92 lg:bg-gradient-to-r lg:from-slate-950/92 lg:via-slate-950/72 lg:to-slate-950/40"
             />
 
-            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center px-5 py-9 sm:px-10 sm:py-12 lg:px-12 lg:py-14">
+            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center px-5 pt-10 pb-11 sm:px-10 sm:py-12 lg:px-12 lg:py-14">
               {/* Columna izquierda: Titular, Buscador integrado y CTAs gemelos */}
-              <div className="lg:col-span-7 space-y-5 text-white">
+              <div className="lg:col-span-7 space-y-6 text-white">
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-slate-950/60 px-3.5 py-1.5 text-xs font-extrabold backdrop-blur-md">
                   <span
                     aria-hidden="true"
@@ -548,6 +550,11 @@ export function HomeExperienceClient({
                     </Link>
                   )}
                 </div>
+
+                <p className="sm:hidden pt-1 flex items-center justify-center gap-1.5 text-xs font-bold text-white/75">
+                  <span>Deslizá para ver alojamientos y precios</span>
+                  <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                </p>
               </div>
 
               {/* Columna derecha Desktop: Collage tríptico arquitectónico en abanico */}
@@ -633,41 +640,44 @@ export function HomeExperienceClient({
         </div>
 
         {/* Franja de 4 pilares con medallas circulares de marca */}
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-5 sm:mt-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {TRUST_PILLARS.map((pillar) => {
-              const Icon = pillar.icon;
-              return (
-                <div
-                  key={pillar.title}
-                  className="flex items-center gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-3.5 shadow-xs"
-                >
-                  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand-primary)] text-white shadow-sm">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs sm:text-sm font-extrabold text-[var(--text-primary)] leading-tight">
-                      {pillar.title}
-                    </p>
-                    <p className="text-[11px] font-medium text-[var(--text-secondary)] leading-snug">
-                      {pillar.description}
-                    </p>
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-8 sm:mt-8">
+          <ScrollReveal distance="sm">
+            <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory no-scrollbar -mx-4 px-4 pb-1 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 lg:grid-cols-4 sm:gap-3.5 sm:overflow-visible sm:pb-0">
+              {TRUST_PILLARS.map((pillar) => {
+                const Icon = pillar.icon;
+                return (
+                  <div
+                    key={pillar.title}
+                    className="min-w-[74vw] max-w-[270px] sm:min-w-0 sm:max-w-none snap-start flex items-center gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4 shadow-xs"
+                  >
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--brand-primary)] text-white shadow-sm">
+                      <Icon className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-extrabold text-[var(--text-primary)] leading-tight">
+                        {pillar.title}
+                      </p>
+                      <p className="text-[11px] font-medium text-[var(--text-secondary)] leading-snug">
+                        {pillar.description}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </ScrollReveal>
         </div>
       </section>
 
       {/* CONTENIDO EDITORIAL PRINCIPAL */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-12 sm:space-y-16 py-8 sm:py-12">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-16 sm:space-y-20 py-12 sm:py-16 pb-20 sm:pb-16">
         {/* 2. LOS MÁS ELEGIDOS + FILTROS INTERACTIVOS */}
-        <section
-          id="alojamientos-disponibles"
-          aria-labelledby="featured-listings-heading"
-          className="space-y-5 scroll-mt-24"
-        >
+        <ScrollReveal stepLabel="01 · Alojamientos">
+          <section
+            id="alojamientos-disponibles"
+            aria-labelledby="featured-listings-heading"
+            className="space-y-6 scroll-mt-24"
+          >
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div className="space-y-1">
               <span className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-primary)]">
@@ -846,7 +856,7 @@ export function HomeExperienceClient({
                       )}
                     </div>
 
-                    <div className="p-4 sm:p-5 flex flex-1 flex-col justify-between gap-4">
+                    <div className="p-5 flex flex-1 flex-col justify-between gap-4">
                       <div className="space-y-2">
                         <p className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--text-secondary)] truncate max-w-full">
                           <MapPin
@@ -918,84 +928,88 @@ export function HomeExperienceClient({
               })}
             </div>
           )}
-        </section>
+          </section>
+        </ScrollReveal>
 
         {/* 3. DESCUBRÍ DESTINOS EN ARGENTINA (Discover new places) */}
-        <section
-          aria-labelledby="discover-destinations-heading"
-          className="space-y-4"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
-            <div className="space-y-1">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-primary)]">
-                Corredores principales
-              </span>
-              <h2
-                id="discover-destinations-heading"
-                className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]"
-              >
-                Descubrí destinos en Argentina
-              </h2>
-            </div>
-            <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
-              Tocá un corredor para filtrar los alojamientos disponibles.
-            </p>
-          </div>
-
-          <div className="flex gap-3.5 overflow-x-auto snap-x snap-mandatory no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 lg:grid-cols-4 sm:gap-4 sm:overflow-visible">
-            {DESTINATION_CARDS.map((dest) => {
-              const isSelected = activeFilter === dest.corridor;
-              return (
-                <button
-                  key={dest.corridor}
-                  type="button"
-                  onClick={() =>
-                    handleSelectDestination(dest.corridor, dest.title)
-                  }
-                  aria-pressed={isSelected}
-                  className={`group relative min-w-[66vw] max-w-[240px] sm:min-w-0 sm:max-w-none snap-start aspect-[4/5] rounded-3xl overflow-hidden text-left border transition-all cursor-pointer ${
-                    isSelected
-                      ? "border-[var(--brand-primary)] ring-2 ring-[var(--brand-primary)]"
-                      : "border-[var(--border-subtle)] hover:border-[var(--brand-primary)]"
-                  }`}
+        <ScrollReveal stepLabel="02 · Destinos">
+          <section
+            aria-labelledby="discover-destinations-heading"
+            className="space-y-5"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+              <div className="space-y-1">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-primary)]">
+                  Corredores principales
+                </span>
+                <h2
+                  id="discover-destinations-heading"
+                  className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]"
                 >
-                  <Image
-                    src={dest.imageUrl}
-                    alt={`${dest.title} — ${dest.subtitle}`}
-                    fill
-                    sizes="(max-width: 640px) 66vw, (max-width: 1024px) 50vw, 25vw"
-                    className="object-cover transition-transform duration-500 group-hover:scale-105"
-                  />
-                  <div
-                    aria-hidden="true"
-                    className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/25 to-transparent"
-                  />
-                  <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-2 text-white">
-                    <div className="min-w-0">
-                      <p className="text-base sm:text-lg font-extrabold leading-tight">
-                        {dest.title}
-                      </p>
-                      <p className="text-[11px] sm:text-xs font-semibold text-white/85 truncate">
-                        {dest.subtitle}
-                      </p>
+                  Descubrí destinos en Argentina
+                </h2>
+              </div>
+              <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+                Tocá un corredor para filtrar los alojamientos disponibles.
+              </p>
+            </div>
+
+            <div className="flex gap-3.5 overflow-x-auto snap-x snap-mandatory no-scrollbar pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 lg:grid-cols-4 sm:gap-4 sm:overflow-visible">
+              {DESTINATION_CARDS.map((dest) => {
+                const isSelected = activeFilter === dest.corridor;
+                return (
+                  <button
+                    key={dest.corridor}
+                    type="button"
+                    onClick={() =>
+                      handleSelectDestination(dest.corridor, dest.title)
+                    }
+                    aria-pressed={isSelected}
+                    className={`group relative min-w-[66vw] max-w-[240px] sm:min-w-0 sm:max-w-none snap-start aspect-[4/5] rounded-3xl overflow-hidden text-left border transition-all cursor-pointer ${
+                      isSelected
+                        ? "border-[var(--brand-primary)] ring-2 ring-[var(--brand-primary)]"
+                        : "border-[var(--border-subtle)] hover:border-[var(--brand-primary)]"
+                    }`}
+                  >
+                    <Image
+                      src={dest.imageUrl}
+                      alt={`${dest.title} — ${dest.subtitle}`}
+                      fill
+                      sizes="(max-width: 640px) 66vw, (max-width: 1024px) 50vw, 25vw"
+                      className="object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <div
+                      aria-hidden="true"
+                      className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/25 to-transparent"
+                    />
+                    <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-2 text-white">
+                      <div className="min-w-0">
+                        <p className="text-base sm:text-lg font-extrabold leading-tight">
+                          {dest.title}
+                        </p>
+                        <p className="text-[11px] sm:text-xs font-semibold text-white/85 truncate">
+                          {dest.subtitle}
+                        </p>
+                      </div>
+                      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md group-hover:bg-[var(--brand-primary)] transition-colors">
+                        <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+                      </span>
                     </div>
-                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur-md group-hover:bg-[var(--brand-primary)] transition-colors">
-                      <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        </ScrollReveal>
 
         {/* 4. SIMULADOR EDITORIAL TRANQUILO + COMODIDAD VISUAL + REVELACIÓN PROGRESIVA */}
         <section
           id="experiencia-central"
           aria-labelledby="core-experience-heading"
-          className="space-y-6 scroll-mt-24"
+          className="space-y-8 scroll-mt-24"
         >
-          <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 sm:p-8 shadow-[var(--shadow-card)] space-y-6">
+          <ScrollReveal stepLabel="03 · Simulador de precio">
+            <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 sm:p-8 shadow-[var(--shadow-card)] space-y-7">
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-[var(--border-subtle)] pb-5">
               <div className="flex items-center gap-3.5">
                 <Icon3D name="compass" size="lg" />
@@ -1158,10 +1172,12 @@ export function HomeExperienceClient({
                 </button>
               </div>
             </div>
-          </div>
+            </div>
+          </ScrollReveal>
 
           {/* Guía progresiva de etapas y transparencia */}
-          <div className="space-y-4">
+          <ScrollReveal stepLabel="04 · Garantías y detalles" delayMs={50}>
+            <div className="space-y-5">
             {showDemoWalkthrough && (
               <ProgressiveDisclosure
                 icon="compass"
@@ -1362,91 +1378,94 @@ export function HomeExperienceClient({
                 </div>
               </div>
             </ProgressiveDisclosure>
-          </div>
+            </div>
+          </ScrollReveal>
         </section>
 
         {/* 5. EXPERIENCIA PARA DUEÑOS — Ubicada al final del inicio */}
-        <section
-          aria-labelledby="hosts-section-heading"
-          className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 sm:p-8 shadow-[var(--shadow-card)]"
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
-            <div className="lg:col-span-7 space-y-4">
-              <div className="flex items-start gap-3.5">
-                <Icon3D name="building" size="lg" />
-                <div className="space-y-1.5">
-                  <span className="inline-flex items-center rounded-full bg-[var(--badge-consorcio-bg)] border border-[var(--badge-consorcio-border)] px-3 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-[var(--badge-consorcio-text)]">
-                    Para dueños
-                  </span>
-                  <h2
-                    id="hosts-section-heading"
-                    className="text-xl sm:text-2xl font-extrabold text-[var(--text-primary)]"
+        <ScrollReveal stepLabel="05 · Para propietarios">
+          <section
+            aria-labelledby="hosts-section-heading"
+            className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 sm:p-8 shadow-[var(--shadow-card)]"
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="lg:col-span-7 space-y-4">
+                <div className="flex items-start gap-3.5">
+                  <Icon3D name="building" size="lg" />
+                  <div className="space-y-1.5">
+                    <span className="inline-flex items-center rounded-full bg-[var(--badge-consorcio-bg)] border border-[var(--badge-consorcio-border)] px-3 py-0.5 text-[11px] font-extrabold uppercase tracking-wider text-[var(--badge-consorcio-text)]">
+                      Para dueños
+                    </span>
+                    <h2
+                      id="hosts-section-heading"
+                      className="text-xl sm:text-2xl font-extrabold text-[var(--text-primary)]"
+                    >
+                      Quiero ser anfitrión en I-bita
+                    </h2>
+                    <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed max-w-2xl">
+                      Completá tu registro guiado en 4 pasos. Revisamos y
+                      aprobamos tu perfil para que publiques con tranquilidad.
+                    </p>
+                  </div>
+                </div>
+
+                <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-bold text-[var(--text-primary)]">
+                  <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+                    <CheckCircle2
+                      className="h-4 w-4 text-emerald-600 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>Cobros en ARS o USDT</span>
+                  </li>
+                  <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+                    <CheckCircle2
+                      className="h-4 w-4 text-emerald-600 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>Entrevista previa 1–6m</span>
+                  </li>
+                  <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+                    <CheckCircle2
+                      className="h-4 w-4 text-emerald-600 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>Perfiles aprobados</span>
+                  </li>
+                </ul>
+
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <Link
+                    href="/onboarding/anfitrion"
+                    className="btn-secondary-3d inline-flex min-h-[48px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-6 text-sm font-extrabold whitespace-nowrap"
                   >
-                    Quiero ser anfitrión en I-bita
-                  </h2>
-                  <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed max-w-2xl">
-                    Completá tu registro guiado en 4 pasos. Revisamos y
-                    aprobamos tu perfil para que publiques con tranquilidad.
-                  </p>
+                    <span>Quiero ser anfitrión</span>
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Link>
+                  <span className="text-xs font-bold text-[var(--text-secondary)]">
+                    Menos de 2 min · Con verificación
+                  </span>
                 </div>
               </div>
 
-              <ul className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-bold text-[var(--text-primary)]">
-                <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-                  <CheckCircle2
-                    className="h-4 w-4 text-emerald-600 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>Cobros en ARS o USDT</span>
-                </li>
-                <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-                  <CheckCircle2
-                    className="h-4 w-4 text-emerald-600 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>Entrevista previa 1–6m</span>
-                </li>
-                <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-                  <CheckCircle2
-                    className="h-4 w-4 text-emerald-600 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>Perfiles aprobados</span>
-                </li>
-              </ul>
-
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <Link
-                  href="/onboarding/anfitrion"
-                  className="btn-secondary-3d inline-flex min-h-[48px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl px-6 text-sm font-extrabold whitespace-nowrap"
-                >
-                  <span>Quiero ser anfitrión</span>
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </Link>
-                <span className="text-xs font-bold text-[var(--text-secondary)]">
-                  Menos de 2 min · Con verificación
+              <div className="lg:col-span-5 relative aspect-[16/10] rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+                <Image
+                  src={HOST_BANNER_URL}
+                  alt="Departamento de diseño preparado para publicar en I-bita"
+                  fill
+                  sizes="(max-width: 1024px) 100vw, 42vw"
+                  className="object-cover"
+                />
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-0 bg-gradient-to-t from-slate-950/65 via-transparent to-transparent"
+                />
+                <span className="absolute bottom-3 left-3 rounded-full border border-white/25 bg-slate-950/75 px-3 py-1 text-xs font-extrabold text-white backdrop-blur-md">
+                  Registro guiado en 4 pasos
                 </span>
               </div>
             </div>
-
-            <div className="lg:col-span-5 relative aspect-[16/10] rounded-2xl overflow-hidden border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-              <Image
-                src={HOST_BANNER_URL}
-                alt="Departamento de diseño preparado para publicar en I-bita"
-                fill
-                sizes="(max-width: 1024px) 100vw, 42vw"
-                className="object-cover"
-              />
-              <div
-                aria-hidden="true"
-                className="absolute inset-0 bg-gradient-to-t from-slate-950/65 via-transparent to-transparent"
-              />
-              <span className="absolute bottom-3 left-3 rounded-full border border-white/25 bg-slate-950/75 px-3 py-1 text-xs font-extrabold text-white backdrop-blur-md">
-                Registro guiado en 4 pasos
-              </span>
-            </div>
-          </div>
-        </section>
+          </section>
+        </ScrollReveal>
       </div>
     </div>
   );

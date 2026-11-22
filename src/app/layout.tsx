@@ -100,7 +100,7 @@ export default function RootLayout({
 
           <footer
             role="contentinfo"
-            className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] pt-8 pb-24 lg:py-8 text-sm text-[var(--text-secondary)]"
+            className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] pt-10 pb-28 lg:py-10 text-sm text-[var(--text-secondary)]"
           >
             <div className="mx-auto flex max-w-7xl flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 text-center sm:text-left">
               <p className="font-semibold text-[var(--text-primary)]">

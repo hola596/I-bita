@@ -39,7 +39,7 @@ export function ProgressiveDisclosure({
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((prev) => !prev)}
-        className="flex min-h-[56px] w-full items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[var(--bg-secondary)]/70 transition-colors cursor-pointer"
+        className="flex min-h-[56px] w-full items-center justify-between gap-4 px-5 py-5 sm:px-6 text-left hover:bg-[var(--bg-secondary)]/70 transition-colors cursor-pointer"
       >
         <div className="flex items-center gap-3.5 min-w-0">
           <Icon3D name={icon} size="md" />
