@@ -1,168 +1,105 @@
-"use client";
+import type { Metadata } from "next";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { HostApprovalStatus } from "@/modules/auth/actions";
+import {
+  HostOnboardingWizard,
+  type HostOnboardingInitialProfile,
+  type HostOnboardingInitialUser,
+} from "@/components/onboarding/HostOnboardingWizard";
 
-import { useState } from "react";
-import { completeHostOnboardingAction } from "@/modules/auth/actions";
+export const dynamic = "force-dynamic";
 
-export default function HostOnboardingPage() {
-  const [status, setStatus] = useState<{
-    type: "idle" | "loading" | "success" | "error";
-    message?: string;
-  }>({ type: "idle" });
+export const metadata: Metadata = {
+  title: "Registro de Dueños y Anfitriones | I-bita Argentina",
+  description:
+    "Completá tu alta guiada en pocos minutos: datos de contacto, respaldo fiscal, cobros y aprobación de perfil.",
+};
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setStatus({ type: "loading" });
-    const formData = new FormData(e.currentTarget);
+interface HostOnboardingPageProps {
+  searchParams: Promise<{ editar?: string }>;
+}
 
-    const res = await completeHostOnboardingAction({
-      fullName: String(formData.get("fullName") ?? ""),
-      phoneWhatsapp: String(formData.get("phoneWhatsapp") ?? ""),
-      cuitCuil: String(formData.get("cuitCuil") ?? ""),
-      payoutCbuCvu: String(formData.get("payoutCbuCvu") ?? ""),
-      payoutUsdtWallet: String(formData.get("payoutUsdtWallet") ?? ""),
-      payoutSplitArsPct: Number(formData.get("payoutSplitArsPct") ?? 100),
-    });
+export default async function HostOnboardingPage({
+  searchParams,
+}: HostOnboardingPageProps) {
+  const { editar } = await searchParams;
+  const startInEditMode = editar === "1";
 
-    if (res.ok) {
-      setStatus({
-        type: "success",
-        message: `Perfil de Anfitrión (HOST) activado con éxito. Wallet EIP-55 verificada: ${res.data.checksumWallet}`,
-      });
-    } else {
-      setStatus({
-        type: "error",
-        message: res.error.message,
-      });
+  let initialUser: HostOnboardingInitialUser | null = null;
+  let initialProfile: HostOnboardingInitialProfile | null = null;
+  let initialApprovalStatus: HostApprovalStatus = "NONE";
+  let initialApprovalNotes: string | null = null;
+  let existingPropertiesCount = 0;
+  let canApproveLocally = process.env.NODE_ENV !== "production";
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      initialUser = {
+        id: user.id,
+        email: user.email ?? null,
+      };
+
+      const [profileRes, propertiesCountRes] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select(
+            "full_name, phone_whatsapp, cuit_cuil, payout_cbu_cvu, payout_usdt_wallet, payout_split_ars_pct, response_schedule, role, host_approval_status, host_approval_notes"
+          )
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("properties")
+          .select("id", { count: "exact", head: true })
+          .eq("host_id", user.id),
+      ]);
+
+      existingPropertiesCount = propertiesCountRes.count ?? 0;
+
+      const profileRow = profileRes.data;
+      if (profileRow) {
+        initialProfile = {
+          fullName: profileRow.full_name ?? undefined,
+          phoneWhatsapp: profileRow.phone_whatsapp ?? undefined,
+          cuitCuil: profileRow.cuit_cuil ?? undefined,
+          payoutCbuCvu: profileRow.payout_cbu_cvu ?? undefined,
+          payoutUsdtWallet: profileRow.payout_usdt_wallet ?? undefined,
+          payoutSplitArsPct:
+            typeof profileRow.payout_split_ars_pct === "number"
+              ? profileRow.payout_split_ars_pct
+              : undefined,
+          responseSchedule: profileRow.response_schedule ?? undefined,
+          role: profileRow.role ?? undefined,
+        };
+        initialApprovalStatus = (profileRow.host_approval_status ??
+          "NONE") as HostApprovalStatus;
+        initialApprovalNotes = profileRow.host_approval_notes
+          ? String(profileRow.host_approval_notes)
+          : null;
+
+        if (profileRow.role === "SUPERADMIN") {
+          canApproveLocally = true;
+        }
+      }
     }
+  } catch {
+    initialUser = null;
+    initialProfile = null;
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6 space-y-8">
-      <header className="space-y-2">
-        <span className="badge-consorcio-friendly rounded-full px-3 py-1 text-xs font-bold">
-          KYB / KYC Fiscal & Split Bi-Monetario (ARS + USDT Polygon)
-        </span>
-        <h1 className="text-3xl font-extrabold tracking-tight pt-2">
-          Onboarding de Anfitrión y Cuentas de Liquidación
-        </h1>
-        <p className="text-sm text-[var(--text-secondary)]">
-          Configurá cómo querés recibir tus cobros: CBU/CVU en Pesos Argentinos al instante y/o tu billetera USDT en la red Polygon verificada con checksum EIP-55.
-        </p>
-      </header>
-
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 space-y-5 shadow-xs"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="fullName" className="block text-sm font-bold mb-1">
-              Nombre o Razón Social *
-            </label>
-            <input
-              id="fullName"
-              name="fullName"
-              type="text"
-              required
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-              placeholder="Martín Gómez Propiedades"
-            />
-          </div>
-          <div>
-            <label htmlFor="phoneWhatsapp" className="block text-sm font-bold mb-1">
-              WhatsApp Operativo *
-            </label>
-            <input
-              id="phoneWhatsapp"
-              name="phoneWhatsapp"
-              type="tel"
-              required
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-              placeholder="+5491123456789"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="cuitCuil" className="block text-sm font-bold mb-1">
-              CUIT / CUIL (Validación Módulo 11) *
-            </label>
-            <input
-              id="cuitCuil"
-              name="cuitCuil"
-              type="text"
-              required
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono"
-              placeholder="20-12345678-6"
-            />
-          </div>
-          <div>
-            <label htmlFor="payoutSplitArsPct" className="block text-sm font-bold mb-1">
-              % Split en ARS (Resto en USDT) *
-            </label>
-            <input
-              id="payoutSplitArsPct"
-              name="payoutSplitArsPct"
-              type="number"
-              min={0}
-              max={100}
-              defaultValue={70}
-              required
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label htmlFor="payoutCbuCvu" className="block text-sm font-bold mb-1">
-            CBU / CVU Bancario o Billetera Virtual en ARS (22 dígitos) *
-          </label>
-          <input
-            id="payoutCbuCvu"
-            name="payoutCbuCvu"
-            type="text"
-            required
-            maxLength={22}
-            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono"
-            placeholder="0000003100012345678901"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="payoutUsdtWallet" className="block text-sm font-bold mb-1">
-            Dirección de Wallet USDT (Red Polygon · EIP-55 Checksum con `viem`) *
-          </label>
-          <input
-            id="payoutUsdtWallet"
-            name="payoutUsdtWallet"
-            type="text"
-            required
-            className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono"
-            placeholder="0x223c27263ef7d49491031e6cda3feaf2690dd1f7"
-          />
-        </div>
-
-        {status.type === "error" && (
-          <p role="alert" className="rounded-xl bg-red-100 text-red-900 px-4 py-2.5 text-xs font-bold">
-            {status.message}
-          </p>
-        )}
-
-        {status.type === "success" && (
-          <p role="status" className="badge-consorcio-friendly rounded-xl px-4 py-2.5 text-xs font-bold">
-            {status.message}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={status.type === "loading"}
-          className="w-full rounded-xl bg-[var(--brand-primary)] px-5 py-3 text-sm font-bold text-white hover:bg-[var(--brand-primary-hover)] disabled:opacity-50 cursor-pointer"
-        >
-          {status.type === "loading" ? "Validando CUIT, CBU y Wallet..." : "Activar Perfil de Anfitrión"}
-        </button>
-      </form>
-    </div>
+    <HostOnboardingWizard
+      initialUser={initialUser}
+      initialProfile={initialProfile}
+      initialApprovalStatus={initialApprovalStatus}
+      initialApprovalNotes={initialApprovalNotes}
+      existingPropertiesCount={existingPropertiesCount}
+      startInEditMode={startInEditMode}
+      canApproveLocally={canApproveLocally}
+    />
   );
 }

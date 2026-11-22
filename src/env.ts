@@ -13,6 +13,9 @@ export const env = createEnv({
     WHATSAPP_API_TOKEN: z.string().min(20),
     WHATSAPP_PHONE_NUMBER_ID: z.string().min(5),
     RESEND_API_KEY: z.string().startsWith("re_"),
+    ADMIN_NOTIFICATION_EMAIL: z.string().email().optional(),
+    RESEND_FROM_EMAIL: z.string().min(3).optional(),
+    ADMIN_WHATSAPP_ALERT_PHONE: z.string().min(8).optional(),
     MP_ACCESS_TOKEN: z
       .string()
       .regex(/^(APP_USR|TEST)-/, "Must start with APP_USR- or TEST-"),
@@ -23,6 +26,7 @@ export const env = createEnv({
     NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
     NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(20),
     NEXT_PUBLIC_APP_URL: z.string().url(),
+    NEXT_PUBLIC_SUPPORT_WHATSAPP: z.string().min(8).optional(),
     NEXT_PUBLIC_MP_PUBLIC_KEY: z
       .string()
       .regex(/^(APP_USR|TEST)-/, "Must start with APP_USR- or TEST-"),
@@ -38,12 +42,16 @@ export const env = createEnv({
     WHATSAPP_API_TOKEN: process.env.WHATSAPP_API_TOKEN,
     WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
+    ADMIN_NOTIFICATION_EMAIL: process.env.ADMIN_NOTIFICATION_EMAIL,
+    RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL,
+    ADMIN_WHATSAPP_ALERT_PHONE: process.env.ADMIN_WHATSAPP_ALERT_PHONE,
     MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN,
     MP_WEBHOOK_SECRET: process.env.MP_WEBHOOK_SECRET,
     EVM_RPC_URL: process.env.EVM_RPC_URL,
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    NEXT_PUBLIC_SUPPORT_WHATSAPP: process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP,
     NEXT_PUBLIC_MP_PUBLIC_KEY: process.env.NEXT_PUBLIC_MP_PUBLIC_KEY,
     NEXT_PUBLIC_USDT_CONTRACT_ADDRESS:
       process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS,

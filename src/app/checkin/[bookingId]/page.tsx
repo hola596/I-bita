@@ -1,26 +1,23 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  ShieldCheck,
-  Building2,
-  Calendar,
-  MapPin,
-  Lock,
-  ExternalLink,
-} from "lucide-react";
+import { Building2, Calendar, Lock, MapPin, ShieldCheck } from "lucide-react";
 import {
   resolveDemoOrBookingCheckinStateAction,
   getBookingAccessDetailsAction,
 } from "@/modules/consortium/actions";
 import { BiometricCheckinFlow } from "@/components/kyc/BiometricCheckinFlow";
+import { Icon3D } from "@/components/ui/Icon3D";
+import { AchievementBanner } from "@/components/ui/AchievementBanner";
+import { getBookingHostResponseState } from "@/modules/hosts/response-sla";
+import { HostResponseWindowCard } from "@/components/host/HostResponseWindowCard";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title:
-    "Pre-Check-in Biométrico Zero-Trust · Escáner PDF417 DNI (@zxing) & Gemini 2.5 Flash",
+  title: "Confirmar identidad para ingresar · I-bita",
   description:
-    "Validación biométrica obligatoria de adultos declarados mediante lectura PDF417 del DNI argentino (@zxing) y auditoría multimodal con Google Gemini 2.5 Flash para Consorcios de Propiedad Horizontal.",
+    "Validá tu DNI y tu foto en 3 pasos simples para recibir la clave de ingreso y el pase digital de portería.",
 };
 
 interface CheckinPageProps {
@@ -47,118 +44,161 @@ export default async function BiometricPreCheckinPage({
   const checkinState = stateRes.data;
   const { booking, consortium } = checkinState;
 
-  // Para el verificador de acceso usa el token del cupo activo (o el de la URL)
-  const accessRes = await getBookingAccessDetailsAction(
-    booking.id,
-    token ?? checkinState.activeSlot?.inviteToken ?? null
-  );
+  const [accessRes, hostResponseState] = await Promise.all([
+    getBookingAccessDetailsAction(
+      booking.id,
+      token ?? checkinState.activeSlot?.inviteToken ?? null
+    ),
+    getBookingHostResponseState(booking.id),
+  ]);
   const access = accessRes.ok ? accessRes.data : null;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
-      {/* Cabecera de la Reserva y Protocolo Consorcio Friendly */}
-      <header className="space-y-4 border-b border-[var(--border-subtle)] pb-6">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      {/* Cabecera clara y humana */}
+      <header className="surface-card p-6 sm:p-8 space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="badge-consorcio-friendly inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-extrabold">
             <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            Épica 3 · Story 3.2 — Pre-Check-in Biométrico PDF417 + Gemini 2.5
-            Flash
+            Ingreso protegido · Edificio amigable
           </span>
 
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1 text-xs font-bold">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1 text-xs font-bold text-[var(--text-secondary)]">
             <Lock
               className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400"
               aria-hidden="true"
             />
-            Zero-Trust Gate: PIN Bloqueado hasta 100% Adultos Verificados
+            Tus datos quedan resguardados (Ley 25.326)
           </span>
         </div>
 
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div className="space-y-1.5">
-            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
-              Pre-Check-in Biométrico · {booking.propertyTitle}
-            </h1>
-            <p className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[var(--text-secondary)] font-medium">
-              <span className="inline-flex items-center gap-1 font-bold text-[var(--text-primary)]">
-                <MapPin
-                  className="h-4 w-4 text-[var(--brand-primary)]"
-                  aria-hidden="true"
-                />
-                {booking.addressLine} · {booking.unitIdentifier}
-              </span>
-              <span aria-hidden="true">·</span>
-              <span className="inline-flex items-center gap-1">
-                <Calendar className="h-4 w-4" aria-hidden="true" />
-                {booking.checkIn} al {booking.checkOut} ({booking.nightsCount}{" "}
-                noches)
-              </span>
-              {consortium?.active && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span className="inline-flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-400">
-                    <Building2 className="h-4 w-4" aria-hidden="true" />
-                    {consortium.consortiumName}
-                  </span>
-                </>
-              )}
-            </p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <Icon3D name="face" size="lg" />
+            <div className="space-y-1.5">
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                Confirmá tu identidad · {booking.propertyTitle}
+              </h1>
+              <p className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[var(--text-secondary)] font-medium">
+                <span className="inline-flex items-center gap-1 font-bold text-[var(--text-primary)]">
+                  <MapPin
+                    className="h-4 w-4 text-[var(--brand-primary)]"
+                    aria-hidden="true"
+                  />
+                  {booking.addressLine} · {booking.unitIdentifier}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1">
+                  <Calendar className="h-4 w-4" aria-hidden="true" />
+                  {booking.checkIn} al {booking.checkOut} ({booking.nightsCount}{" "}
+                  noches)
+                </span>
+                {consortium?.active && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="inline-flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-400">
+                      <Building2 className="h-4 w-4" aria-hidden="true" />
+                      {consortium.consortiumName}
+                    </span>
+                  </>
+                )}
+              </p>
+            </div>
           </div>
 
-          <a
+          <Link
             href={`/p/${booking.propertySlug}`}
-            className="inline-flex items-center gap-1.5 self-start md:self-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3.5 py-2 text-xs font-bold hover:bg-[var(--bg-elevated)]"
+            className="btn-secondary-3d inline-flex min-h-[42px] items-center justify-center rounded-xl px-4 text-xs font-extrabold self-start md:self-auto whitespace-nowrap"
           >
-            <span>Volver a /p/{booking.propertySlug}</span>
-            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-          </a>
+            Ver detalle del departamento
+          </Link>
         </div>
       </header>
 
-      {/* Flujo Móvil Interactivo de Verificación Biométrica */}
+      {/* Asistente paso a paso de confirmación */}
       <BiometricCheckinFlow initialState={checkinState} />
 
-      {/* Compuerta Zero-Trust (Story 3.3): el PIN y el QR solo se renderizan en servidor con 100% verificado */}
+      {/* Ventana sincronizada de respuesta e instrucciones de ingreso del anfitrión */}
+      {hostResponseState && (
+        <HostResponseWindowCard
+          mode="booking-status"
+          bookingId={hostResponseState.bookingId}
+          hostName={hostResponseState.hostName}
+          bookingStatus={hostResponseState.bookingStatus}
+          windowSummary={hostResponseState}
+        />
+      )}
+
+      {/* Entrega segura de la clave de entrada y pase de portería */}
       <section
         aria-labelledby="access-gate-heading"
-        className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5 space-y-3"
+        className="surface-card p-6 sm:p-8 space-y-4"
       >
-        <h2 id="access-gate-heading" className="text-xl font-extrabold">
-          Acceso a la Unidad y Pase de Portería
-        </h2>
+        <div className="flex items-center gap-3">
+          <Icon3D name="key" size="md" />
+          <div>
+            <h2 id="access-gate-heading" className="text-xl font-extrabold">
+              Tu clave de entrada y pase para portería
+            </h2>
+            <p className="text-xs text-[var(--text-secondary)]">
+              Se habilitan automáticamente en cuanto todos los adultos completan
+              su validación.
+            </p>
+          </div>
+        </div>
+
         {access && access.accessCode ? (
           <div className="space-y-4">
-            <p>
-              PIN de cerradura:{" "}
-              <code className="rounded-lg bg-[var(--bg-primary)] px-3 py-1 text-lg font-black">
-                {access.accessCode}
-              </code>
-            </p>
-            {access.porteriaPass && (
-              <div className="space-y-2">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={access.porteriaPass.qrDataUrl}
-                  alt="Código QR del Pase Digital de Portería"
-                  width={240}
-                  height={240}
-                  className="rounded-xl bg-white p-2"
-                />
-                <p className="text-xs break-all">
-                  Verificador:{" "}
-                  <a className="underline" href={access.porteriaPass.verificationUrl}>
-                    abrir pase en portería
-                  </a>
-                </p>
-              </div>
-            )}
+            <AchievementBanner
+              icon="trophy"
+              tone="emerald"
+              title="¡Todo listo! Ya tenés tu ingreso habilitado"
+              description="Usá este código en la cerradura al llegar y mostrá el QR si el encargado te lo pide."
+            />
+
+            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5 space-y-4">
+              <p className="text-sm font-bold">
+                Código de la puerta:{" "}
+                <code className="ml-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] px-4 py-1.5 text-xl font-black tracking-wider">
+                  {access.accessCode}
+                </code>
+              </p>
+              {access.porteriaPass && (
+                <div className="space-y-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={access.porteriaPass.qrDataUrl}
+                    alt="Código QR del Pase Digital de Portería"
+                    width={220}
+                    height={220}
+                    className="rounded-2xl bg-white p-3 border border-[var(--border-subtle)]"
+                  />
+                  <p className="text-xs">
+                    <a
+                      className="btn-secondary-3d inline-flex min-h-[40px] items-center rounded-xl px-4 font-extrabold"
+                      href={access.porteriaPass.verificationUrl}
+                    >
+                      Abrir pase digital para portería →
+                    </a>
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
-          <p className="text-sm text-[var(--text-secondary)]">
-            <Lock className="inline h-4 w-4" aria-hidden="true" /> Bloqueado en el
-            servidor hasta que el 100% de los adultos declarados complete su
-            verificación. Recargá la página al finalizar.
-          </p>
+          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 flex items-start gap-3 text-xs sm:text-sm text-[var(--text-secondary)]">
+            <Lock
+              className="h-4 w-4 shrink-0 mt-0.5 text-amber-600"
+              aria-hidden="true"
+            />
+            <p className="leading-relaxed">
+              Por tranquilidad del consorcio, la clave de la cerradura permanece
+              guardada hasta que{" "}
+              <strong>todos los adultos declarados</strong> completen los 3
+              pasos de arriba. Cuando terminen, recargá esta página para ver tu
+              código.
+            </p>
+          </div>
         )}
       </section>
     </div>

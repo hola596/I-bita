@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AppError } from "@/lib/errors/app-error";
+import { MidTermPolicySchema } from "./mid-term-policy";
 
 export const PROPERTY_CORRIDORS = [
   "CABA",
@@ -222,6 +223,7 @@ export const CreatePropertyBaseSchema = z.object({
       240,
       "Las instrucciones de cerradura electrónica no pueden superar los 240 caracteres"
     ),
+  midTermPolicy: MidTermPolicySchema.optional(),
   is_published: z.boolean().default(true),
 });
 
@@ -255,6 +257,7 @@ export const CreatePropertySchema = z.preprocess((raw) => {
       obj.absorb_installments_cost ?? obj.absorbInstallmentsCost ?? false,
     accepts_usdt: obj.accepts_usdt ?? obj.acceptsUsdt ?? true,
     wifi_speed_mbps: obj.wifi_speed_mbps ?? obj.wifiSpeedMbps ?? 300,
+    midTermPolicy: obj.midTermPolicy ?? obj.mid_term_policy,
     is_published: obj.is_published ?? obj.isPublished ?? true,
   };
 }, CreatePropertyBaseSchema);

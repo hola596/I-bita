@@ -1,51 +1,99 @@
 @import "tailwindcss";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-:root {
-  /* Paleta Light Mode — Contraste WCAG 2.1 AAA inspirado en Airbnb Argentina + Identidad I-bita */
+:root,
+:root[data-theme="light"] {
+  /* Paleta Light Mode — Contraste WCAG 2.1 AAA (>= 7:1 en cuerpo de texto) */
   --bg-primary: #ffffff;
-  --bg-secondary: #f7f7f7;
+  --bg-secondary: #f6f7f9;
   --bg-elevated: #ffffff;
-  --text-primary: #141414;
-  --text-secondary: #4a4a4a;
-  --border-subtle: #dddddd;
+  --surface-tint: #fff1f3;
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --border-subtle: #d6dae2;
 
   /* Acento Principal I-bita (Coral / Terracota Argentino accesible) */
   --brand-primary: #d90b38;
   --brand-primary-hover: #b8072d;
+  --ring-focus: #d90b38;
+
+  /* Elevación y profundidad táctica 3D */
+  --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.05), 0 12px 28px -10px rgba(15, 23, 42, 0.08);
+  --shadow-3d: 0 6px 16px -4px rgba(217, 11, 56, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.36);
 
   /* Diferencial 1: Sello Consorcio Friendly / Portería Verificada (Verde Esmeralda AAA) */
   --badge-consorcio-bg: #e6f6ec;
-  --badge-consorcio-text: #064e24;
+  --badge-consorcio-text: #054420;
   --badge-consorcio-border: #0d8a42;
 
   /* Diferencial 2: Motor Bi-Monetario (ARS Cuotas Mercado Pago / USDT Polygon) */
   --badge-ars-bg: #e0f2fe;
-  --badge-ars-text: #074166;
+  --badge-ars-text: #06395a;
   --badge-usdt-bg: #dcfce7;
-  --badge-usdt-text: #064e3b;
+  --badge-usdt-text: #05442e;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg-primary: #0f1115;
-    --bg-secondary: #181b22;
-    --bg-elevated: #1e222b;
+  :root:not([data-theme="light"]) {
+    --bg-primary: #0d1016;
+    --bg-secondary: #151923;
+    --bg-elevated: #1b202d;
+    --surface-tint: #2a141d;
     --text-primary: #f8fafc;
     --text-secondary: #cbd5e1;
-    --border-subtle: #2a2e39;
+    --border-subtle: #2c3344;
 
     --brand-primary: #ff385c;
-    --brand-primary-hover: #ff5a76;
+    --brand-primary-hover: #ff5775;
+    --ring-focus: #ff6b86;
+
+    --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.35), 0 16px 32px -12px rgba(0, 0, 0, 0.55);
+    --shadow-3d: 0 8px 18px -4px rgba(255, 56, 92, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 
     --badge-consorcio-bg: #052e16;
-    --badge-consorcio-text: #86efac;
+    --badge-consorcio-text: #bbf7d0;
     --badge-consorcio-border: #22c55e;
 
     --badge-ars-bg: #082f49;
-    --badge-ars-text: #7dd3fc;
+    --badge-ars-text: #bae6fd;
     --badge-usdt-bg: #064e3b;
-    --badge-usdt-text: #6ee7b7;
+    --badge-usdt-text: #a7f3d0;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg-primary: #0d1016;
+  --bg-secondary: #151923;
+  --bg-elevated: #1b202d;
+  --surface-tint: #2a141d;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --border-subtle: #2c3344;
+
+  --brand-primary: #ff385c;
+  --brand-primary-hover: #ff5775;
+  --ring-focus: #ff6b86;
+
+  --shadow-card: 0 4px 14px rgba(0, 0, 0, 0.35), 0 16px 32px -12px rgba(0, 0, 0, 0.55);
+  --shadow-3d: 0 8px 18px -4px rgba(255, 56, 92, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+
+  --badge-consorcio-bg: #052e16;
+  --badge-consorcio-text: #bbf7d0;
+  --badge-consorcio-border: #22c55e;
+
+  --badge-ars-bg: #082f49;
+  --badge-ars-text: #bae6fd;
+  --badge-usdt-bg: #064e3b;
+  --badge-usdt-text: #a7f3d0;
+}
+
+/* Modo de lectura confortable para personas mayores o lectura relajada */
+:root[data-reading-size="comfortable"] {
+  font-size: 112.5%;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
@@ -53,6 +101,13 @@ body {
   color: var(--text-primary);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Foco de teclado consistente WCAG 2.1 AAA */
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--ring-focus);
+  outline-offset: 2px;
 }
 
 /* Skip Link accesible por teclado (WCAG 2.1 AAA) */
@@ -65,7 +120,7 @@ body {
   background-color: var(--text-primary);
   color: var(--bg-primary);
   font-weight: 700;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   text-decoration: none;
   transition: top 0.15s ease-in-out;
 }
@@ -76,9 +131,173 @@ body {
   outline-offset: 2px;
 }
 
+/* Superficie unificada y simétrica */
+.surface-card {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.5rem;
+  box-shadow: var(--shadow-card);
+}
+
+/* Botones táctiles 3D consistentes en toda la app */
+.btn-primary-3d {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand-primary) 92%, white 12%) 0%, var(--brand-primary) 100%);
+  color: #ffffff;
+  border: 1px solid color-mix(in srgb, var(--brand-primary) 80%, black 20%);
+  box-shadow: var(--shadow-3d);
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+  cursor: pointer;
+}
+
+.btn-primary-3d:hover:not(:disabled) {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+.btn-primary-3d:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 2px 6px -2px rgba(217, 11, 56, 0.35), inset 0 2px 4px rgba(0, 0, 0, 0.18);
+}
+
+.btn-secondary-3d {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 2px 0 rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
+  cursor: pointer;
+}
+
+.btn-secondary-3d:hover:not(:disabled) {
+  background-color: var(--bg-secondary);
+  border-color: var(--brand-primary);
+  transform: translateY(-1px);
+}
+
+.btn-secondary-3d:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.tile-3d {
+  box-shadow:
+    0 8px 16px -6px rgba(15, 23, 42, 0.25),
+    0 2px 4px -1px rgba(15, 23, 42, 0.12),
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.55),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.16);
+}
+
 /* Badge oficial Consorcio Friendly / Portería Verificada */
 .badge-consorcio-friendly {
   background-color: var(--badge-consorcio-bg);
   color: var(--badge-consorcio-text);
   border: 1px solid var(--badge-consorcio-border);
+}
+
+@keyframes ibita-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ibita-progress {
+  0% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(140%);
+  }
+}
+
+@keyframes ibita-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* Fondo arquitectónico sutil para asistentes de registro (inspirado en dubinc/dub) */
+.onboarding-grid-bg {
+  background-image:
+    radial-gradient(60% 45% at 50% 0%, color-mix(in srgb, var(--brand-primary) 11%, transparent), transparent 72%),
+    radial-gradient(45% 40% at 85% 15%, rgba(16, 185, 129, 0.08), transparent 70%),
+    linear-gradient(to right, color-mix(in srgb, var(--border-subtle) 40%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--border-subtle) 40%, transparent) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+}
+
+@keyframes ibita-slide-next {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ibita-slide-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-ibita-fade-up {
+  animation: ibita-fade-up 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-ibita-slide-next {
+  animation: ibita-slide-next 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-ibita-slide-prev {
+  animation: ibita-slide-prev 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-ibita-float {
+  animation: ibita-float 2.4s ease-in-out infinite;
+}
+
+.animate-ibita-progress {
+  animation: ibita-progress 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .animate-ibita-fade-up,
+  .animate-ibita-slide-next,
+  .animate-ibita-slide-prev,
+  .animate-ibita-float,
+  .animate-ibita-progress {
+    animation: none !important;
+  }
+  .btn-primary-3d,
+  .btn-secondary-3d {
+    transition: none;
+  }
+}
+
+/* Scroll horizontal limpio para carruseles y filtros estilo app móvil */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

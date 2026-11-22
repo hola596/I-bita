@@ -3,10 +3,8 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { BrowserPDF417Reader, type IScannerControls } from "@zxing/browser";
 import {
-  ShieldCheck,
   Camera,
   Upload,
-  CheckCircle2,
   AlertCircle,
   Lock,
   Users,
@@ -17,6 +15,9 @@ import {
   Sparkles,
   FileCheck2,
   XCircle,
+  ArrowLeft,
+  ArrowRight,
+  Loader2,
 } from "lucide-react";
 import {
   parseArgentineDniPdf417,
@@ -29,6 +30,10 @@ import {
   type SanitizedVerificationSlotSummary,
 } from "@/modules/consortium/actions";
 import type { AllowedKycImageMimeType } from "@/modules/consortium/gemini-kyc";
+import { Icon3D } from "@/components/ui/Icon3D";
+import { AchievementBanner } from "@/components/ui/AchievementBanner";
+import { ProgressiveDisclosure } from "@/components/ui/ProgressiveDisclosure";
+import { usePreferences } from "@/components/providers/PreferencesProvider";
 
 export interface BiometricCheckinFlowProps {
   initialState: BookingCheckinState;
@@ -39,26 +44,22 @@ const PRESET_RENAPER_ADULT_PAYLOADS: ReadonlyArray<{
   payload: string;
 }> = [
   {
-    label: "Trama RENAPER Adulto #1 (Titular)",
+    label: "Persona #1 de ejemplo (Titular)",
     payload:
       "00548291034@GONZALEZ@VALENTINA SOFIA@F@38941205@A@14/06/1995@22/09/2022@207",
   },
   {
-    label: "Trama RENAPER Adulto #2 (Acompañante)",
+    label: "Persona #2 de ejemplo (Acompañante)",
     payload:
       "00619482731@FERNANDEZ@LUCAS MATIAS@M@36418920@B@08/11/1992@15/03/2021@209",
   },
   {
-    label: "Trama RENAPER Adulto #3 (Acompañante)",
+    label: "Persona #3 de ejemplo (Acompañante)",
     payload:
       "00738192045@RODRIGUEZ@CAMILA BELEN@F@40129384@A@25/02/1997@10/01/2023@274",
   },
 ];
 
-/**
- * Genera en el navegador un lienzo PNG/WebP diferenciado para pruebas en desktop sin cámara,
- * garantizando cabeceras binarias reales y hashes SHA-256 distintos entre Frente de DNI y Selfie.
- */
 function generateCanvasEvidenceDataUrl(
   kind: "dni-front" | "selfie",
   parsed: ParsedArgentineDniPdf417 | null,
@@ -110,7 +111,6 @@ function generateCanvasEvidenceDataUrl(
     ctx.fillText(`Slot ID: ${slotId}`, 36, 255);
     ctx.fillText(`Evidencia: ${kind.toUpperCase()}`, 36, 290);
 
-    // Silueta facial sintética diferenciada por tipo de captura
     ctx.beginPath();
     ctx.arc(
       kind === "dni-front" ? 500 : 490,
@@ -145,14 +145,22 @@ async function readFileAsDataUrl(file: File): Promise<{
       resolve({ dataUrl: result, mimeType: mime });
     };
     reader.onerror = () =>
-      reject(new Error("No se pudo leer el archivo de imagen seleccionado."));
+      reject(new Error("No se pudo leer la imagen elegida. Probá con otra."));
     reader.readAsDataURL(file);
   });
+}
+
+function getFriendlySlotStatus(status: string): string {
+  if (status === "VERIFIED") return "Confirmado";
+  if (status === "REJECTED") return "Revisar";
+  return "Pendiente";
 }
 
 export function BiometricCheckinFlow({
   initialState,
 }: BiometricCheckinFlowProps) {
+  const { notify } = usePreferences();
+
   const [booking, setBooking] = useState(initialState.booking);
   const [slots, setSlots] = useState<SanitizedVerificationSlotSummary[]>(
     initialState.slots
@@ -162,6 +170,7 @@ export function BiometricCheckinFlow({
       initialState.slots[0]?.inviteToken ??
       ""
   );
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
 
   const activeSlot = useMemo(
     () =>
@@ -204,7 +213,6 @@ export function BiometricCheckinFlow({
     reasoning?: string;
   }>({ status: "idle" });
 
-  // Parseo reactivo en tiempo real de la trama PDF417 RENAPER
   const parsedPdf417State = useMemo<{
     ok: boolean;
     data?: ParsedArgentineDniPdf417;
@@ -213,7 +221,7 @@ export function BiometricCheckinFlow({
     if (!pdf417RawPayload.trim()) {
       return {
         ok: false,
-        error: "Escaneá o ingresá la trama PDF417 del dorso de tu DNI argentino.",
+        error: "Escaneá o cargá los datos del dorso de tu DNI argentino.",
       };
     }
     try {
@@ -227,12 +235,11 @@ export function BiometricCheckinFlow({
         error:
           err instanceof Error
             ? err.message
-            : "Trama PDF417 inválida según estándar RENAPER.",
+            : "No pudimos leer ese formato de DNI. Revisá que sea un documento argentino vigente.",
       };
     }
   }, [pdf417RawPayload]);
 
-  // Detener el stream de cámara al desmontar el componente
   useEffect(() => {
     return () => {
       if (scannerControlsRef.current) {
@@ -243,14 +250,14 @@ export function BiometricCheckinFlow({
   }, []);
 
   async function startLivePdf417Camera() {
-    setCameraStatus("Iniciando lector óptico PDF417 (@zxing/browser)...");
+    setCameraStatus("Abriendo tu cámara...");
     setCameraActive(true);
 
     try {
       const reader = new BrowserPDF417Reader();
       if (!videoRef.current) {
         setCameraStatus(
-          "Apuntá la cámara trasera al código de barras PDF417 del dorso del DNI."
+          "Apuntá la cámara al código de barras del dorso de tu DNI."
         );
         return;
       }
@@ -262,9 +269,8 @@ export function BiometricCheckinFlow({
           if (result) {
             const text = result.getText();
             setPdf417RawPayload(text);
-            setCameraStatus(
-              "¡Código PDF417 RENAPER detectado y decodificado con éxito!"
-            );
+            setCameraStatus("¡Listo! Leímos tu DNI correctamente.");
+            notify("¡Código del DNI leído con éxito!", "success", "check");
             controls.stop();
             scannerControlsRef.current = null;
             setCameraActive(false);
@@ -272,13 +278,11 @@ export function BiometricCheckinFlow({
         }
       );
       scannerControlsRef.current = controls;
-      setCameraStatus(
-        "Cámara activa: enfocá el código PDF417 del dorso de tu DNI tarjeta."
-      );
+      setCameraStatus("Cámara lista: enfocá el código de barras del dorso del DNI.");
     } catch {
       setCameraActive(false);
       setCameraStatus(
-        "No se detectó cámara disponible en este dispositivo. Podés subir una foto del dorso o usar el lector de trama RENAPER abajo."
+        "No encontramos una cámara activa acá. Podés subir una foto del dorso o usar los datos de prueba abajo."
       );
     }
   }
@@ -298,7 +302,7 @@ export function BiometricCheckinFlow({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setCameraStatus("Decodificando código PDF417 de la imagen con @zxing...");
+    setCameraStatus("Leyendo el código de tu foto...");
     const objectUrl = URL.createObjectURL(file);
     try {
       const img = new window.Image();
@@ -306,19 +310,20 @@ export function BiometricCheckinFlow({
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = () =>
-          reject(new Error("No se pudo cargar la imagen del código PDF417."));
+          reject(new Error("No pudimos abrir esa foto. Probá con otra más nítida."));
       });
 
       const decoded = await decodeDniPdf417FromBrowserImage(img);
       setPdf417RawPayload(decoded.rawPayload);
       setCameraStatus(
-        `¡PDF417 decodificado con @zxing! Titular: ${decoded.fullName} (DNI ${decoded.documentNumber}).`
+        `¡Genial! Identificamos a ${decoded.fullName} (DNI ${decoded.documentNumber}).`
       );
+      notify("¡Datos del DNI leídos!", "success", "check");
     } catch (err) {
       setCameraStatus(
         err instanceof Error
           ? err.message
-          : "No se pudo decodificar el código PDF417 desde la imagen."
+          : "No pudimos leer el código en esa foto. Probá con mejor luz."
       );
     } finally {
       URL.revokeObjectURL(objectUrl);
@@ -334,6 +339,7 @@ export function BiometricCheckinFlow({
       setDniFrontDataUrl(dataUrl);
       setDniFrontMimeType(mimeType);
       setDniFrontLabel(`${file.name} (${(file.size / 1024).toFixed(0)} KB)`);
+      notify("Foto del frente del DNI cargada.", "info", "check");
     } finally {
       e.target.value = "";
     }
@@ -347,6 +353,7 @@ export function BiometricCheckinFlow({
       setSelfieDataUrl(dataUrl);
       setSelfieMimeType(mimeType);
       setSelfieLabel(`${file.name} (${(file.size / 1024).toFixed(0)} KB)`);
+      notify("Tu foto selfie quedó lista.", "info", "face");
     } finally {
       e.target.value = "";
     }
@@ -367,15 +374,17 @@ export function BiometricCheckinFlow({
 
     setDniFrontDataUrl(front.dataUrl);
     setDniFrontMimeType(front.mimeType);
-    setDniFrontLabel("Captura digital frente DNI (640x420 PNG)");
+    setDniFrontLabel("Imagen de prueba — Frente de DNI");
 
     setSelfieDataUrl(selfie.dataUrl);
     setSelfieMimeType(selfie.mimeType);
-    setSelfieLabel("Captura biométrica selfie en vivo (640x420 PNG)");
+    setSelfieLabel("Imagen de prueba — Selfie en vivo");
+    notify("Preparamos las dos imágenes de prueba.", "info", "sparkle");
   }
 
   async function handleSelectSlot(slot: SanitizedVerificationSlotSummary) {
     setSelectedToken(slot.inviteToken);
+    setWizardStep(1);
     setSubmitState({ status: "idle" });
     const presetIdx = Math.max(
       0,
@@ -389,6 +398,13 @@ export function BiometricCheckinFlow({
     setDniFrontLabel("");
     setSelfieDataUrl("");
     setSelfieLabel("");
+    notify(
+      `Ahora estás viendo el paso de ${
+        slot.isPrimaryGuest ? "la persona titular" : `el acompañante #${slot.slotIndex}`
+      }.`,
+      "info",
+      "user"
+    );
   }
 
   async function handleCopyInviteLink(slot: SanitizedVerificationSlotSummary) {
@@ -398,10 +414,12 @@ export function BiometricCheckinFlow({
         : slot.checkinPath;
     try {
       await navigator.clipboard.writeText(url);
-      setCopiedToken(slot.inviteToken);
     } catch {
-      setCopiedToken(slot.inviteToken);
+      // Continuar con feedback visual
     }
+    setCopiedToken(slot.inviteToken);
+    notify("Link copiado para compartir con tu acompañante.", "success", "check");
+    window.setTimeout(() => setCopiedToken(null), 2500);
   }
 
   async function handleSubmitBiometrics(e: React.FormEvent<HTMLFormElement>) {
@@ -413,7 +431,6 @@ export function BiometricCheckinFlow({
     let effectiveSelfieUrl = selfieDataUrl;
     let effectiveSelfieMime = selfieMimeType;
 
-    // Si está en un entorno de prueba desktop y aún no adjuntó archivos, generar capturas de lienzo válidas
     if (!effectiveFrontUrl || !effectiveSelfieUrl) {
       const front = generateCanvasEvidenceDataUrl(
         "dni-front",
@@ -430,9 +447,9 @@ export function BiometricCheckinFlow({
       effectiveSelfieUrl = selfie.dataUrl;
       effectiveSelfieMime = selfie.mimeType;
       setDniFrontDataUrl(front.dataUrl);
-      setDniFrontLabel("Captura digital frente DNI (640x420 PNG)");
+      setDniFrontLabel("Imagen de prueba — Frente de DNI");
       setSelfieDataUrl(selfie.dataUrl);
-      setSelfieLabel("Captura biométrica selfie en vivo (640x420 PNG)");
+      setSelfieLabel("Imagen de prueba — Selfie en vivo");
     }
 
     setSubmitState({ status: "submitting" });
@@ -475,12 +492,20 @@ export function BiometricCheckinFlow({
     setSubmitState({
       status: "success",
       message: res.data.allAdultsVerified
-        ? `¡100% de los adultos declarados (${res.data.verifiedAdultsCount}/${res.data.declaredAdultsCount}) verificados! La reserva alcanzó el estado ALL_ADULTS_VERIFIED.`
-        : `Identidad verificada para ${res.data.slot.fullNameExtracted} (${res.data.verifiedAdultsCount}/${res.data.declaredAdultsCount} adultos verificados). Seleccioná el siguiente acompañante para completar el grupo.`,
+        ? `¡Completamos el grupo (${res.data.verifiedAdultsCount} de ${res.data.declaredAdultsCount})! Tu código de entrada ya está disponible abajo.`
+        : `¡Identidad confirmada para ${res.data.slot.fullNameExtracted}! Ya van ${res.data.verifiedAdultsCount} de ${res.data.declaredAdultsCount} adultos listos.`,
       confidenceScore: res.data.auditSummary.confidenceScore,
       auditedModel: res.data.auditSummary.auditedModel,
       reasoning: res.data.auditSummary.reasoning,
     });
+
+    notify(
+      res.data.allAdultsVerified
+        ? "¡Grupo 100% confirmado! Recargá la página para ver tu clave de entrada."
+        : "¡Identidad aprobada! Podés seguir con la siguiente persona.",
+      "celebration",
+      "trophy"
+    );
   }
 
   const progressPct = Math.min(
@@ -491,54 +516,61 @@ export function BiometricCheckinFlow({
     )
   );
 
+  const goToStep = (nextStep: 1 | 2 | 3) => {
+    setWizardStep(nextStep);
+    setSubmitState((prev) =>
+      prev.status === "error" ? { status: "idle" } : prev
+    );
+  };
+
   return (
     <div className="space-y-6">
-      {/* Barra de Progreso Grupal Zero-Trust (verified_adults_count / declared_adults_count) */}
+      {/* Progreso del grupo */}
       <section
         aria-labelledby="group-progress-heading"
-        className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 shadow-xs space-y-4"
+        className="surface-card p-6 space-y-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-1">
-            <span className="badge-consorcio-friendly inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold">
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              Compuerta Biométrica Zero-Trust ·{" "}
-              {initialState.consortium?.consortiumName ??
-                "Consorcio Propiedad Horizontal"}
-            </span>
-            <h2
-              id="group-progress-heading"
-              className="text-xl sm:text-2xl font-extrabold pt-1"
-            >
-              Progreso de Verificación de Adultos:{" "}
-              <span className="text-[var(--brand-primary)]">
-                {booking.verifiedAdultsCount} / {booking.declaredAdultsCount}
-              </span>{" "}
-              ({progressPct}%)
-            </h2>
+          <div className="flex items-center gap-3">
+            <Icon3D name="shield" size="md" />
+            <div>
+              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                {initialState.consortium?.consortiumName ??
+                  "Consorcio verificado"}
+              </span>
+              <h2
+                id="group-progress-heading"
+                className="text-xl sm:text-2xl font-extrabold tracking-tight"
+              >
+                Huéspedes confirmados:{" "}
+                <span className="text-[var(--brand-primary)]">
+                  {booking.verifiedAdultsCount} de {booking.declaredAdultsCount}
+                </span>{" "}
+                ({progressPct}%)
+              </h2>
+            </div>
           </div>
 
-          <div className="text-right">
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-extrabold ${
-                booking.allAdultsVerified
-                  ? "badge-consorcio-friendly"
-                  : "bg-amber-500/15 text-amber-900 dark:text-amber-300 border border-amber-500/40"
-              }`}
-            >
-              <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-              Estado Reserva: <code>{booking.status}</code>
-            </span>
-          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-extrabold ${
+              booking.allAdultsVerified
+                ? "badge-consorcio-friendly"
+                : "bg-amber-500/15 text-amber-900 dark:text-amber-300 border border-amber-500/40"
+            }`}
+          >
+            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+            {booking.allAdultsVerified
+              ? "Grupo 100% confirmado"
+              : "Faltan personas por confirmar"}
+          </span>
         </div>
 
-        {/* Barra visual accesible */}
         <div
           role="progressbar"
           aria-valuenow={booking.verifiedAdultsCount}
           aria-valuemin={0}
           aria-valuemax={booking.declaredAdultsCount}
-          aria-label="Adultos verificados biométricamente"
+          aria-label="Adultos con identidad confirmada"
           className="h-3.5 w-full overflow-hidden rounded-full bg-[var(--bg-secondary)] border border-[var(--border-subtle)]"
         >
           <div
@@ -547,26 +579,22 @@ export function BiometricCheckinFlow({
           />
         </div>
 
-        <p className="text-xs text-[var(--text-secondary)]">
-          {booking.allAdultsVerified ? (
-            <strong className="text-emerald-700 dark:text-emerald-400">
-              ✓ Todos los adultos declarados han completado su verificación
-              RENAPER PDF417 + Gemini 2.5 Flash. La reserva se encuentra en{" "}
-              <code>ALL_ADULTS_VERIFIED</code>.
-            </strong>
-          ) : (
-            <>
-              Por seguridad del consorcio, el código de cerradura electrónica
-              permanece criptográficamente bloqueado en el servidor (
-              <code>accessCode: null</code>) hasta que los{" "}
-              <strong>{booking.declaredAdultsCount} adultos declarados</strong>{" "}
-              completen su Pre-Check-in Biométrico.
-            </>
-          )}
-        </p>
+        {booking.allAdultsVerified ? (
+          <AchievementBanner
+            icon="trophy"
+            tone="emerald"
+            title="¡Todas las personas del viaje están confirmadas!"
+            description="El edificio ya tiene su pase listo y podés ver tu clave de acceso en la tarjeta de abajo."
+          />
+        ) : (
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+            Elegí a una persona de la lista para completar sus 3 pasos o compartile
+            su link personal para que lo haga desde su propio teléfono.
+          </p>
+        )}
 
-        {/* Tarjetas de Cupos de Adultos Declarados (Slots en public.guest_verifications) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+        {/* Tarjetas simétricas de huéspedes adultos */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {slots.map((slot) => {
             const isSelected = slot.inviteToken === activeSlot?.inviteToken;
             const isVerified = slot.status === "VERIFIED";
@@ -574,7 +602,7 @@ export function BiometricCheckinFlow({
             return (
               <div
                 key={slot.id}
-                className={`rounded-2xl border p-4 transition-all space-y-2.5 ${
+                className={`rounded-2xl border p-4 transition-all space-y-3 ${
                   isSelected
                     ? "border-[var(--brand-primary)] bg-[var(--bg-primary)] ring-2 ring-[var(--brand-primary)]/20"
                     : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
@@ -589,32 +617,31 @@ export function BiometricCheckinFlow({
                   </span>
 
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold ${
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
                       isVerified
                         ? "badge-consorcio-friendly"
                         : slot.status === "REJECTED"
-                        ? "bg-red-100 text-red-900"
-                        : "bg-amber-500/20 text-amber-900 dark:text-amber-200"
+                          ? "bg-red-100 text-red-900"
+                          : "bg-amber-500/20 text-amber-900 dark:text-amber-200"
                     }`}
                   >
-                    {slot.status}
+                    {getFriendlySlotStatus(slot.status)}
                   </span>
                 </div>
 
                 {isVerified ? (
                   <div className="text-xs space-y-0.5">
-                    <p className="font-bold text-[var(--text-primary)] truncate">
+                    <p className="font-extrabold text-[var(--text-primary)] truncate">
                       {slot.fullNameExtracted}
                     </p>
                     <p className="font-mono text-[11px] text-[var(--text-secondary)]">
-                      DNI {slot.maskedDocumentNumber} · Score{" "}
+                      DNI {slot.maskedDocumentNumber} · Coincidencia{" "}
                       {slot.biometricConfidenceScore ?? 95}%
                     </p>
                   </div>
                 ) : (
-                  <p className="text-[11px] text-[var(--text-secondary)]">
-                    Pendiente de escaneo PDF417 RENAPER + Selfie auditada por
-                    Gemini 2.5 Flash.
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Falta validar su DNI y selfie rápida.
                   </p>
                 )}
 
@@ -622,34 +649,37 @@ export function BiometricCheckinFlow({
                   <button
                     type="button"
                     onClick={() => handleSelectSlot(slot)}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-extrabold cursor-pointer ${
+                    className={`min-h-[38px] rounded-xl px-3 py-1.5 text-xs font-extrabold cursor-pointer ${
                       isSelected
-                        ? "bg-[var(--brand-primary)] text-white"
-                        : "border border-[var(--border-subtle)] bg-[var(--bg-primary)] hover:bg-[var(--bg-elevated)]"
+                        ? "btn-primary-3d"
+                        : "btn-secondary-3d"
                     }`}
                   >
                     {isVerified
                       ? "Ver ficha"
                       : isSelected
-                      ? "Verificando ahora"
-                      : "Verificar este adulto"}
+                        ? "Completando ahora"
+                        : "Completar este"}
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleCopyInviteLink(slot)}
-                    title="Copiar link único de invitación para este adulto"
-                    className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[11px] font-bold hover:bg-[var(--bg-elevated)] cursor-pointer"
+                    title="Copiar link personal para invitar a esta persona"
+                    className="btn-secondary-3d inline-flex min-h-[38px] items-center gap-1 rounded-xl px-2.5 py-1.5 text-[11px] font-bold"
                   >
                     {copiedToken === slot.inviteToken ? (
                       <>
-                        <Check className="h-3 w-3 text-emerald-600" />
+                        <Check
+                          className="h-3.5 w-3.5 text-emerald-600"
+                          aria-hidden="true"
+                        />
                         <span>Copiado</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="h-3 w-3" />
-                        <span>Link Token</span>
+                        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                        <span>Enviar link</span>
                       </>
                     )}
                   </button>
@@ -660,106 +690,176 @@ export function BiometricCheckinFlow({
         </div>
       </section>
 
-      {/* Formulario Móvil Paso a Paso para el Adulto Seleccionado */}
+      {/* Asistente progresivo de 3 pasos para el adulto elegido */}
       {activeSlot && (
-        <form
-          onSubmit={handleSubmitBiometrics}
-          className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start"
-        >
-          {/* Columna Izquierda (7 cols): Paso 1 (Consentimiento) + Paso 2 (Escáner PDF417 @zxing) */}
-          <div className="lg:col-span-7 space-y-6">
-            {/* Paso 1: Consentimiento Informado Ley 25.326 */}
+        <form onSubmit={handleSubmitBiometrics} className="space-y-6">
+          {/* Indicador claro de pasos 1 -> 2 -> 3 */}
+          <div className="surface-card p-5 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-extrabold text-[var(--text-primary)]">
+                Validando a:{" "}
+                <span className="text-[var(--brand-primary)]">
+                  Adulto #{activeSlot.slotIndex} (
+                  {activeSlot.isPrimaryGuest ? "Titular" : "Acompañante"})
+                </span>
+              </p>
+              <span className="text-xs font-bold text-[var(--text-secondary)]">
+                Paso {wizardStep} de 3
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { step: 1 as const, label: "1. Tu permiso" },
+                { step: 2 as const, label: "2. Tu DNI" },
+                { step: 3 as const, label: "3. Tu foto" },
+              ].map((item) => {
+                const isCurrent = wizardStep === item.step;
+                const isDone =
+                  (item.step === 1 && consentAccepted && wizardStep > 1) ||
+                  (item.step === 2 && parsedPdf417State.ok && wizardStep > 2);
+
+                return (
+                  <button
+                    key={item.step}
+                    type="button"
+                    onClick={() => {
+                      if (item.step === 1) goToStep(1);
+                      if (item.step === 2 && consentAccepted) goToStep(2);
+                      if (
+                        item.step === 3 &&
+                        consentAccepted &&
+                        parsedPdf417State.ok
+                      ) {
+                        goToStep(3);
+                      }
+                    }}
+                    aria-current={isCurrent ? "step" : undefined}
+                    className={`min-h-[44px] rounded-xl border px-3 py-2 text-xs font-extrabold transition-colors cursor-pointer ${
+                      isCurrent
+                        ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] text-[var(--brand-primary)]"
+                        : isDone
+                          ? "border-emerald-600/40 bg-[var(--badge-consorcio-bg)] text-[var(--badge-consorcio-text)]"
+                          : "border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
+                    }`}
+                  >
+                    {isDone ? `✓ ${item.label}` : item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* PASO 1: Tu permiso (Ley 25.326) */}
+          {wizardStep === 1 && (
             <section
               aria-labelledby="step1-consent-heading"
-              className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 space-y-3"
+              className="surface-card animate-ibita-fade-up p-6 sm:p-8 space-y-5"
             >
-              <div className="flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand-primary)] text-xs font-extrabold text-white">
-                  1
-                </span>
-                <h3
-                  id="step1-consent-heading"
-                  className="text-base sm:text-lg font-extrabold"
-                >
-                  Consentimiento Informado de Biometría (Ley 25.326)
-                </h3>
+              <div className="flex items-center gap-3.5">
+                <Icon3D name="shield" size="md" />
+                <div>
+                  <span className="text-xs font-extrabold text-[var(--brand-primary)]">
+                    PASO 1 DE 3
+                  </span>
+                  <h3
+                    id="step1-consent-heading"
+                    className="text-lg sm:text-xl font-extrabold"
+                  >
+                    Tu permiso para cuidar tus datos
+                  </h3>
+                </div>
               </div>
 
-              <label className="flex items-start gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 cursor-pointer">
+              <label className="flex items-start gap-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 sm:p-5 cursor-pointer">
                 <input
                   type="checkbox"
                   required
                   checked={consentAccepted}
                   onChange={(e) => setConsentAccepted(e.target.checked)}
-                  className="mt-1 h-4 w-4 accent-[var(--brand-primary)] shrink-0"
+                  className="mt-1 h-5 w-5 accent-[var(--brand-primary)] shrink-0"
                 />
-                <span className="text-xs leading-relaxed text-[var(--text-primary)]">
+                <span className="text-xs sm:text-sm leading-relaxed text-[var(--text-primary)]">
                   <strong>
-                    Autorizo expresamente el tratamiento de mis datos
-                    biométricos y documentales (Art. 5 y 6 Ley 25.326)
+                    Autorizo el uso de mi DNI y mi foto únicamente para validar
+                    mi ingreso
                   </strong>{" "}
-                  con el único fin de validar mi identidad ante el consorcio{" "}
+                  ante el consorcio{" "}
                   <strong>
                     {initialState.consortium?.consortiumName ??
                       booking.propertyTitle}
                   </strong>{" "}
-                  y emitir el Pase Digital de Portería. Las imágenes se
-                  almacenan cifradas en el bucket privado{" "}
-                  <code>kyc-documents</code> (<code>public: false</code>).
+                  conforme a la Ley 25.326. Tus imágenes se guardan en un espacio
+                  privado y nunca se comparten con terceros.
                 </span>
               </label>
-            </section>
 
-            {/* Paso 2: Escáner PDF417 del Dorso del DNI Argentino (@zxing/browser + @zxing/library) */}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={!consentAccepted}
+                  onClick={() => goToStep(2)}
+                  className="btn-primary-3d inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-extrabold disabled:opacity-50"
+                >
+                  <span>Sí, autorizo y sigo al paso 2</span>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* PASO 2: Tu DNI */}
+          {wizardStep === 2 && (
             <section
               aria-labelledby="step2-pdf417-heading"
-              className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 space-y-4"
+              className="surface-card animate-ibita-fade-up p-6 sm:p-8 space-y-5"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand-primary)] text-xs font-extrabold text-white">
-                    2
+              <div className="flex items-center gap-3.5">
+                <Icon3D name="card" size="md" />
+                <div>
+                  <span className="text-xs font-extrabold text-[var(--brand-primary)]">
+                    PASO 2 DE 3
                   </span>
                   <h3
                     id="step2-pdf417-heading"
-                    className="text-base sm:text-lg font-extrabold"
+                    className="text-lg sm:text-xl font-extrabold"
                   >
-                    Escáner PDF417 del Dorso del DNI Argentino (
-                    <code>@zxing</code>)
+                    Leemos el código de barras de tu DNI
                   </h3>
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+                    Está en el frente o dorso de tu DNI tarjeta argentino. Podés
+                    usar la cámara o subir una foto.
+                  </p>
                 </div>
-
-                <span className="text-xs font-mono font-bold text-[var(--text-secondary)]">
-                  Adulto #{activeSlot.slotIndex} ·{" "}
-                  {activeSlot.isPrimaryGuest ? "Titular" : "Acompañante"}
-                </span>
               </div>
 
-              {/* Controles de Cámara @zxing/browser y Subida de Imagen del Código PDF417 */}
-              <div className="flex flex-wrap gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {!cameraActive ? (
                   <button
                     type="button"
                     onClick={startLivePdf417Camera}
-                    className="inline-flex items-center gap-2 rounded-xl bg-[var(--text-primary)] text-[var(--bg-primary)] px-4 py-2.5 text-xs font-extrabold hover:opacity-90 cursor-pointer"
+                    className="btn-primary-3d inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-xs sm:text-sm font-extrabold"
                   >
                     <Camera className="h-4 w-4" aria-hidden="true" />
-                    Escanear PDF417 con Cámara (@zxing/browser)
+                    <span>Escanear DNI con cámara</span>
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={stopLivePdf417Camera}
-                    className="inline-flex items-center gap-2 rounded-xl bg-red-600 text-white px-4 py-2.5 text-xs font-extrabold hover:bg-red-700 cursor-pointer"
+                    className="inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl bg-red-600 text-white px-4 py-3 text-xs sm:text-sm font-extrabold hover:bg-red-700 cursor-pointer"
                   >
                     <XCircle className="h-4 w-4" aria-hidden="true" />
-                    Detener Cámara
+                    <span>Cerrar cámara</span>
                   </button>
                 )}
 
-                <label className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-2.5 text-xs font-extrabold hover:bg-[var(--bg-primary)] cursor-pointer">
-                  <ScanBarcode className="h-4 w-4 text-[var(--brand-primary)]" />
-                  <span>Decodificar Foto del Código PDF417 (@zxing)</span>
+                <label className="btn-secondary-3d inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-xs sm:text-sm font-extrabold">
+                  <ScanBarcode
+                    className="h-4 w-4 text-[var(--brand-primary)]"
+                    aria-hidden="true"
+                  />
+                  <span>Subir foto del código</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -784,93 +884,48 @@ export function BiometricCheckinFlow({
               {cameraStatus && (
                 <p
                   role="status"
-                  className="rounded-xl bg-[var(--bg-secondary)] px-3.5 py-2 text-xs font-semibold text-[var(--text-secondary)]"
+                  className="rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-subtle)] px-4 py-2.5 text-xs font-bold text-[var(--text-primary)]"
                 >
                   {cameraStatus}
                 </p>
               )}
 
-              {/* Selector rápido de Trama RENAPER para pruebas en Desktop y entrada directa */}
-              <div className="space-y-2 border-t border-[var(--border-subtle)] pt-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label
-                    htmlFor="pdf417-raw-input"
-                    className="block text-xs font-extrabold"
-                  >
-                    Trama Oficial RENAPER PDF417 Decodificada (8/9 campos con{" "}
-                    <code>@</code>) *
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {PRESET_RENAPER_ADULT_PAYLOADS.map((preset, idx) => (
-                      <button
-                        key={preset.label}
-                        type="button"
-                        onClick={() => setPdf417RawPayload(preset.payload)}
-                        className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] font-bold hover:bg-[var(--bg-primary)] cursor-pointer"
-                      >
-                        Usar DNI Demo #{idx + 1}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <textarea
-                  id="pdf417-raw-input"
-                  rows={2}
-                  required
-                  value={pdf417RawPayload}
-                  onChange={(e) => setPdf417RawPayload(e.target.value)}
-                  placeholder="00548291034@GONZALEZ@VALENTINA SOFIA@F@38941205@A@14/06/1995@22/09/2022@207"
-                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2 text-xs font-mono"
-                />
-              </div>
-
-              {/* Resultado determinista de parseArgentineDniPdf417 */}
               {parsedPdf417State.ok && parsedPdf417State.data ? (
-                <div className="rounded-2xl border border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/50 p-4 space-y-2">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-2xl border border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/50 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[var(--badge-consorcio-text)]">
                       <FileCheck2 className="h-4 w-4" aria-hidden="true" />
-                      Lectura PDF417 RENAPER Válida (Adulto Mayor de 18 Años)
+                      Datos del DNI listos (Mayor de 18 años)
                     </span>
                     <span className="font-mono text-xs font-extrabold text-[var(--badge-consorcio-text)]">
                       DNI {parsedPdf417State.data.documentNumber}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                    <div className="rounded-lg bg-[var(--bg-primary)] p-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div className="rounded-xl bg-[var(--bg-primary)] p-3">
                       <span className="block text-[10px] text-[var(--text-secondary)]">
-                        Titular Extraído
+                        Nombre completo
                       </span>
                       <span className="font-extrabold">
                         {parsedPdf417State.data.fullName}
                       </span>
                     </div>
-                    <div className="rounded-lg bg-[var(--bg-primary)] p-2">
+                    <div className="rounded-xl bg-[var(--bg-primary)] p-3">
                       <span className="block text-[10px] text-[var(--text-secondary)]">
-                        Nacimiento / Edad
+                        Edad verificada
                       </span>
                       <span className="font-extrabold">
-                        {parsedPdf417State.data.birthDate} (
-                        {parsedPdf417State.data.ageYears} años)
+                        {parsedPdf417State.data.ageYears} años (
+                        {parsedPdf417State.data.birthDate})
                       </span>
                     </div>
-                    <div className="rounded-lg bg-[var(--bg-primary)] p-2">
+                    <div className="rounded-xl bg-[var(--bg-primary)] p-3">
                       <span className="block text-[10px] text-[var(--text-secondary)]">
-                        N.º Trámite RENAPER
+                        N.º de trámite
                       </span>
                       <span className="font-mono font-extrabold">
                         {parsedPdf417State.data.tramiteNumber}
-                      </span>
-                    </div>
-                    <div className="rounded-lg bg-[var(--bg-primary)] p-2">
-                      <span className="block text-[10px] text-[var(--text-secondary)]">
-                        Sexo / Ejemplar
-                      </span>
-                      <span className="font-extrabold">
-                        {parsedPdf417State.data.gender} · Ej.{" "}
-                        {parsedPdf417State.data.ejemplar}
                       </span>
                     </div>
                   </div>
@@ -878,123 +933,187 @@ export function BiometricCheckinFlow({
               ) : (
                 <div
                   role="alert"
-                  className="flex items-start gap-2 rounded-2xl bg-red-100 text-red-900 p-3.5 text-xs font-bold"
+                  className="flex items-start gap-2 rounded-2xl bg-red-100 text-red-900 p-4 text-xs font-bold"
                 >
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                   <span>{parsedPdf417State.error}</span>
                 </div>
               )}
-            </section>
-          </div>
 
-          {/* Columna Derecha (5 cols): Paso 3 (Frente DNI + Selfie + Envío a Gemini 2.5 Flash) */}
-          <div className="lg:col-span-5 space-y-6">
-            <section
-              aria-labelledby="step3-gemini-heading"
-              className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 space-y-4"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--brand-primary)] text-xs font-extrabold text-white">
-                    3
-                  </span>
-                  <h3
-                    id="step3-gemini-heading"
-                    className="text-base sm:text-lg font-extrabold"
-                  >
-                    Frente DNI + Selfie (Gemini 2.5 Flash)
-                  </h3>
+              {/* Revelación progresiva para pruebas en escritorio o ingreso manual */}
+              <ProgressiveDisclosure
+                icon="sparkle"
+                title="¿Estás probando desde una computadora? Cargar DNI de prueba"
+                subtitle="Podés elegir una persona de ejemplo o pegar la línea del código manualmente."
+              >
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {PRESET_RENAPER_ADULT_PAYLOADS.map((preset, idx) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setPdf417RawPayload(preset.payload);
+                          notify(
+                            `Cargamos los datos de ejemplo #${idx + 1}.`,
+                            "info",
+                            "card"
+                          );
+                        }}
+                        className="btn-secondary-3d rounded-xl px-3 py-2 text-xs font-extrabold"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="pdf417-raw-input"
+                      className="block text-xs font-bold text-[var(--text-secondary)] mb-1"
+                    >
+                      Lectura completa del código del DNI:
+                    </label>
+                    <textarea
+                      id="pdf417-raw-input"
+                      rows={2}
+                      required
+                      value={pdf417RawPayload}
+                      onChange={(e) => setPdf417RawPayload(e.target.value)}
+                      placeholder="00548291034@GONZALEZ@VALENTINA SOFIA@F@38941205@A@14/06/1995@22/09/2022@207"
+                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2 text-xs font-mono"
+                    />
+                  </div>
                 </div>
+              </ProgressiveDisclosure>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => goToStep(1)}
+                  className="btn-secondary-3d inline-flex min-h-[48px] items-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold"
+                >
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  <span>Paso anterior</span>
+                </button>
 
                 <button
                   type="button"
-                  onClick={handleGenerateCanvasEvidences}
-                  className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] font-bold hover:bg-[var(--bg-primary)] cursor-pointer"
+                  disabled={!parsedPdf417State.ok}
+                  onClick={() => goToStep(3)}
+                  className="btn-primary-3d inline-flex min-h-[48px] items-center gap-2 rounded-2xl px-6 py-3 text-sm font-extrabold disabled:opacity-50"
                 >
-                  <Sparkles className="h-3 w-3 text-[var(--brand-primary)]" />
-                  Generar Capturas Demo
+                  <span>Continuar al paso 3</span>
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
+            </section>
+          )}
 
-              <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                Subí o capturá el <strong>frente de tu DNI</strong> y una{" "}
-                <strong>selfie actual</strong>. El servidor invocará{" "}
-                <strong>Google Gemini 2.5 Flash</strong> (
-                <code>@google/generative-ai</code>) validando coincidencia
-                facial y documental con <code>GeminiBiometricAuditSchema</code>.
-              </p>
-
-              {/* Captura 1: Frente del DNI */}
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold">
-                    A. Fotografía del Frente del DNI *
+          {/* PASO 3: Foto del DNI + Selfie y confirmación */}
+          {wizardStep === 3 && (
+            <section
+              aria-labelledby="step3-gemini-heading"
+              className="surface-card animate-ibita-fade-up p-6 sm:p-8 space-y-5"
+            >
+              <div className="flex items-center gap-3.5">
+                <Icon3D name="face" size="md" />
+                <div>
+                  <span className="text-xs font-extrabold text-[var(--brand-primary)]">
+                    PASO 3 DE 3
                   </span>
-                  {dniFrontDataUrl && (
-                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
-                      ✓ Lista
-                    </span>
-                  )}
+                  <h3
+                    id="step3-gemini-heading"
+                    className="text-lg sm:text-xl font-extrabold"
+                  >
+                    Subí una foto del frente del DNI y tu selfie
+                  </h3>
+                  <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+                    Verificamos que seas vos en pocos segundos para habilitar tu
+                    pase.
+                  </p>
                 </div>
-
-                <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--brand-primary)] bg-[var(--bg-primary)] px-3 py-2.5 text-xs font-bold text-[var(--brand-primary)] hover:bg-[var(--bg-elevated)] cursor-pointer">
-                  <Upload className="h-4 w-4" aria-hidden="true" />
-                  <span>
-                    {dniFrontLabel ||
-                      "Subir o Tomar Foto del Frente del DNI (WebP/JPG/PNG)"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/webp,image/jpeg,image/png,image/avif"
-                    capture="environment"
-                    onChange={handleDniFrontUpload}
-                    className="sr-only"
-                  />
-                </label>
               </div>
 
-              {/* Captura 2: Selfie en Vivo */}
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold">
-                    B. Selfie en Vivo del Huésped *
-                  </span>
-                  {selfieDataUrl && (
-                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
-                      ✓ Lista
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold">
+                      A. Frente de tu DNI
                     </span>
-                  )}
+                    {dniFrontDataUrl && (
+                      <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                        ✓ Lista
+                      </span>
+                    )}
+                  </div>
+
+                  <label className="btn-secondary-3d flex min-h-[54px] items-center justify-center gap-2 rounded-xl border-dashed border-[var(--brand-primary)] px-3 py-2.5 text-xs font-extrabold text-[var(--brand-primary)]">
+                    <Upload className="h-4 w-4" aria-hidden="true" />
+                    <span className="text-center">
+                      {dniFrontLabel || "Sacar o subir foto del frente"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/webp,image/jpeg,image/png,image/avif"
+                      capture="environment"
+                      onChange={handleDniFrontUpload}
+                      className="sr-only"
+                    />
+                  </label>
                 </div>
 
-                <label className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-600 bg-[var(--bg-primary)] px-3 py-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:bg-[var(--bg-elevated)] cursor-pointer">
-                  <UserCheck className="h-4 w-4" aria-hidden="true" />
-                  <span>
-                    {selfieLabel ||
-                      "Tomar Selfie en Vivo o Subir Retrato (WebP/JPG/PNG)"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/webp,image/jpeg,image/png,image/avif"
-                    capture="user"
-                    onChange={handleSelfieUpload}
-                    className="sr-only"
-                  />
-                </label>
+                <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold">
+                      B. Tu selfie actual
+                    </span>
+                    {selfieDataUrl && (
+                      <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                        ✓ Lista
+                      </span>
+                    )}
+                  </div>
+
+                  <label className="btn-secondary-3d flex min-h-[54px] items-center justify-center gap-2 rounded-xl border-dashed border-emerald-600 px-3 py-2.5 text-xs font-extrabold text-emerald-700 dark:text-emerald-400">
+                    <UserCheck className="h-4 w-4" aria-hidden="true" />
+                    <span className="text-center">
+                      {selfieLabel || "Sacarte selfie o subir foto"}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/webp,image/jpeg,image/png,image/avif"
+                      capture="user"
+                      onChange={handleSelfieUpload}
+                      className="sr-only"
+                    />
+                  </label>
+                </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={
-                  !consentAccepted ||
-                  !parsedPdf417State.ok ||
-                  submitState.status === "submitting"
-                }
-                className="w-full rounded-2xl bg-[var(--brand-primary)] px-5 py-3.5 text-sm font-extrabold text-white hover:bg-[var(--brand-primary-hover)] disabled:opacity-50 transition-colors cursor-pointer"
+              <ProgressiveDisclosure
+                icon="sparkle"
+                title="¿No tenés cámara a mano? Usar imágenes de prueba"
+                subtitle="Generá imágenes de muestra para probar el envío desde esta computadora."
               >
-                {submitState.status === "submitting"
-                  ? "Auditando biometría con Gemini 2.5 Flash en servidor..."
-                  : `Verificar Identidad de Adulto #${activeSlot.slotIndex} con Gemini 2.5 Flash`}
-              </button>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Si enviás sin cargar archivos propios, también se usarán
+                    imágenes de prueba válidas automáticamente.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleGenerateCanvasEvidences}
+                    className="btn-secondary-3d inline-flex min-h-[42px] items-center gap-1.5 rounded-xl px-4 text-xs font-extrabold"
+                  >
+                    <Sparkles
+                      className="h-3.5 w-3.5 text-[var(--brand-primary)]"
+                      aria-hidden="true"
+                    />
+                    <span>Cargar imágenes de prueba</span>
+                  </button>
+                </div>
+              </ProgressiveDisclosure>
 
               {submitState.status === "error" && (
                 <div
@@ -1007,31 +1126,50 @@ export function BiometricCheckinFlow({
               )}
 
               {submitState.status === "success" && (
-                <div
-                  role="status"
-                  className="rounded-2xl border-2 border-emerald-600 bg-[var(--badge-consorcio-bg)] p-4 text-xs space-y-2"
-                >
-                  <div className="flex items-center justify-between gap-2 font-extrabold text-[var(--badge-consorcio-text)] text-sm">
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 className="h-5 w-5 shrink-0" />
-                      Verificación Biométrica Aprobada
-                    </span>
-                    <span className="rounded-full bg-emerald-700 text-white px-2.5 py-0.5 text-[11px]">
-                      Score: {submitState.confidenceScore}%
-                    </span>
-                  </div>
-                  <p className="text-[var(--badge-consorcio-text)] font-semibold">
-                    {submitState.message}
-                  </p>
-                  {submitState.reasoning && (
-                    <p className="rounded-xl bg-[var(--bg-primary)] p-2.5 font-mono text-[11px] text-[var(--text-secondary)]">
-                      [{submitState.auditedModel}] {submitState.reasoning}
-                    </p>
-                  )}
-                </div>
+                <AchievementBanner
+                  icon="trophy"
+                  tone="emerald"
+                  title={`¡Identidad confirmada! (Coincidencia ${submitState.confidenceScore}%)`}
+                  description={submitState.message ?? "Ya podés continuar."}
+                />
               )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => goToStep(2)}
+                  className="btn-secondary-3d inline-flex min-h-[50px] items-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold"
+                >
+                  <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                  <span>Paso anterior</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={
+                    !consentAccepted ||
+                    !parsedPdf417State.ok ||
+                    submitState.status === "submitting"
+                  }
+                  className="btn-primary-3d inline-flex min-h-[50px] flex-1 sm:flex-initial items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-extrabold disabled:opacity-50"
+                >
+                  {submitState.status === "submitting" ? (
+                    <>
+                      <Loader2
+                        className="h-4 w-4 animate-spin"
+                        aria-hidden="true"
+                      />
+                      <span>Revisando tus fotos con cuidado...</span>
+                    </>
+                  ) : (
+                    <span>
+                      Confirmar identidad de Adulto #{activeSlot.slotIndex}
+                    </span>
+                  )}
+                </button>
+              </div>
             </section>
-          </div>
+          )}
         </form>
       )}
     </div>

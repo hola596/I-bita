@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { env } from "@/env";
+import { PreferencesProvider } from "@/components/providers/PreferencesProvider";
+import { TopProgressBar } from "@/components/layout/TopProgressBar";
+import { AppHeader } from "@/components/layout/AppHeader";
+import { MobileBottomNav } from "@/components/layout/MobileBottomNav";
+import { NavigationWayfinder } from "@/components/layout/NavigationWayfinder";
 import { CookieConsentBanner } from "@/components/layout/CookieConsentBanner";
 import "./globals.css";
 
@@ -14,11 +20,12 @@ const jakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   metadataBase: new URL(env.NEXT_PUBLIC_APP_URL),
   title: {
-    default: "I-bita | Alquileres Temporarios y Media Estadía en Argentina (ARS, Cuotas y USDT)",
+    default:
+      "I-bita | Alojamientos en Argentina con precio claro en pesos o USDT",
     template: "%s | I-bita Argentina",
   },
   description:
-    "El ecosistema argentino de alquileres temporarios y de media estadía (1 a 6 meses). Pagá en Pesos Argentinos (Mercado Pago, MODO, 3 y 6 cuotas sin percepciones) o USDT, con Pre-Check-in Biométrico Consorcio Friendly y Contratos Digitales CCyC Art. 1199.",
+    "Alquilá en Argentina por día o por mes con tranquilidad: precio claro en pesos o USDT, ingreso amigable para el edificio y contrato digital simple.",
   alternates: {
     canonical: "/",
   },
@@ -27,9 +34,9 @@ export const metadata: Metadata = {
     locale: "es_AR",
     url: env.NEXT_PUBLIC_APP_URL,
     siteName: "I-bita Argentina",
-    title: "I-bita | El Airbnb Argentino Bi-Monetario y Consorcio Friendly",
+    title: "I-bita | Alojamientos claros y tranquilos en Argentina",
     description:
-      "Alojamientos verificados por día y por mes (1 a 6 meses). Cobros en ARS en cuotas o USDT en Polygon, Pase Digital de Portería con QR y Contratos CCyC sellados con SHA-256.",
+      "Alojamientos verificados por día o de 1 a 6 meses. Pagá en pesos en cuotas o USDT, con ingreso ordenado y contrato claro.",
   },
 };
 
@@ -42,7 +49,7 @@ const jsonLdSchema = {
       name: "I-bita Argentina",
       url: env.NEXT_PUBLIC_APP_URL,
       description:
-        "Plataforma Fintech + PropTech + Travel de alquileres temporarios y de media estadía (1 a 6 meses) en Argentina con pagos bi-monetarios (ARS en cuotas / USDT), módulo Consorcio Friendly con validación biométrica y contratos temporarios CCyC Art. 1199.",
+        "Plataforma de alquileres temporarios y media estadía en Argentina con precios claros en pesos o USDT, ingreso ordenado para consorcios y acuerdos digitales simples.",
       areaServed: {
         "@type": "Country",
         name: "Argentina",
@@ -61,14 +68,17 @@ const jsonLdSchema = {
   ],
 };
 
+const ANTI_FOUC_SCRIPT = `(function(){try{var t=localStorage.getItem('ibita_theme_v1');if(t!=='dark'&&t!=='light'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;var r=localStorage.getItem('ibita_reading_size_v1');if(r==='comfortable'){document.documentElement.dataset.readingSize='comfortable';}}catch(e){}})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es-AR" className={jakarta.variable}>
+    <html lang="es-AR" className={jakarta.variable} suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: ANTI_FOUC_SCRIPT }} />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLdSchema) }}
@@ -79,116 +89,47 @@ export default function RootLayout({
           Saltar al contenido principal
         </a>
 
-        {/* Header Sticky inspirado en Airbnb Argentina con Search Pill y Toggle ARS / USDT */}
-        <header
-          role="banner"
-          className="sticky top-0 z-50 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]/95 backdrop-blur-md"
-        >
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
-            <a
-              href="/"
-              className="flex items-center gap-2 text-xl font-extrabold tracking-tight text-[var(--brand-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-primary)] rounded-lg px-1"
-              aria-label="I-bita Inicio"
-            >
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--brand-primary)] text-white font-black">
-                I
-              </span>
-              <span>i-bita</span>
-              <span className="hidden sm:inline-block rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)] border border-[var(--border-subtle)]">
-                .ar
-              </span>
-            </a>
+        <PreferencesProvider>
+          <TopProgressBar />
+          <AppHeader />
+          <NavigationWayfinder />
 
-            {/* Search Pill Central estilo Airbnb Argentina con accesos rápidos */}
-            <nav
-              aria-label="Buscador rápido de estadías y módulos"
-              className="hidden md:flex items-center divide-x divide-[var(--border-subtle)] rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-4 py-2 shadow-sm hover:shadow-md transition-shadow"
-            >
-              <a
-                href="/p/loft-luminoso-palermo-soho"
-                className="pr-4 text-xs font-bold text-[var(--brand-primary)] hover:underline flex items-center gap-1"
-              >
-                🏠 Propiedad Demo (Palermo)
-              </a>
-              <a
-                href="/contratos"
-                className="px-4 text-xs font-semibold hover:text-[var(--brand-primary)]"
-              >
-                📑 Contratos CCyC
-              </a>
-              <a
-                href="/checkin"
-                className="pl-4 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
-              >
-                🛡️ Pre-Checkin KYC
-              </a>
-            </nav>
+          <main id="main-content" className="flex-1">
+            {children}
+          </main>
 
-            {/* Toggle Global Persistente de Moneda ARS / USDT y Accesos */}
-            <div className="flex items-center gap-3">
-              <div
-                role="group"
-                aria-label="Selector de moneda de visualización"
-                className="inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1 text-xs font-bold"
+          <footer
+            role="contentinfo"
+            className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] pt-8 pb-24 lg:py-8 text-sm text-[var(--text-secondary)]"
+          >
+            <div className="mx-auto flex max-w-7xl flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-6 lg:px-8 text-center sm:text-left">
+              <p className="font-semibold text-[var(--text-primary)]">
+                © {new Date().getFullYear()} I-bita Argentina · Alquileres claros,
+                previsibles y seguros.
+              </p>
+              <nav
+                aria-label="Enlaces legales y ayuda"
+                className="flex flex-wrap items-center justify-center gap-4 font-semibold"
               >
-                <span className="rounded-full bg-[var(--bg-primary)] px-2.5 py-1 text-[var(--text-primary)] shadow-xs">
-                  ARS $ (Cuotas)
+                <Link href="/legal/privacidad" className="hover:underline">
+                  Privacidad
+                </Link>
+                <Link href="/legal/terminos" className="hover:underline">
+                  Términos claros
+                </Link>
+                <Link href="/contacto" className="hover:underline">
+                  ¿Necesitás ayuda?
+                </Link>
+                <span className="badge-consorcio-friendly rounded-full px-3 py-1 text-xs font-bold">
+                  ✓ Edificio protegido
                 </span>
-                <span className="px-2.5 py-1 text-[var(--text-secondary)]">
-                  USDT ₮ (Polygon)
-                </span>
-              </div>
-              <a
-                href="/dashboard/propiedades"
-                className="hidden sm:inline-flex items-center rounded-full border border-[var(--border-subtle)] px-3.5 py-1.5 text-xs font-bold hover:bg-[var(--bg-secondary)]"
-              >
-                Mis Propiedades
-              </a>
-              <a
-                href="/onboarding/anfitrion"
-                className="hidden lg:inline-flex items-center rounded-full border border-[var(--border-subtle)] px-3.5 py-1.5 text-xs font-bold hover:bg-[var(--bg-secondary)]"
-              >
-                Modo Anfitrión
-              </a>
-              <a
-                href="/login"
-                className="inline-flex items-center rounded-full bg-[var(--brand-primary)] px-3.5 py-1.5 text-xs font-bold text-white hover:bg-[var(--brand-primary-hover)]"
-              >
-                Ingresar
-              </a>
+              </nav>
             </div>
-          </div>
-        </header>
+          </footer>
 
-        <main id="main-content" className="flex-1">
-          {children}
-        </main>
-
-        <footer
-          role="contentinfo"
-          className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] py-8 text-sm text-[var(--text-secondary)]"
-        >
-          <div className="mx-auto flex max-w-7xl flex-col sm:flex-row items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-            <p className="font-medium">
-              © {new Date().getFullYear()} I-bita Argentina — Alquileres Temporarios y Media Estadía (CCyC Art. 1199 · Ley 25.326).
-            </p>
-            <div className="flex flex-wrap items-center gap-4 font-semibold">
-              <a href="/legal/privacidad" className="hover:underline">
-                Privacidad Biométrica
-              </a>
-              <a href="/legal/terminos" className="hover:underline">
-                Términos CCyC
-              </a>
-              <a href="/contacto" className="hover:underline">
-                Contacto Seguro
-              </a>
-              <span className="badge-consorcio-friendly rounded-full px-3 py-1 text-xs">
-                ✓ Zero-Trust Consorcial Activo
-              </span>
-            </div>
-          </div>
-        </footer>
-        <CookieConsentBanner />
+          <MobileBottomNav />
+          <CookieConsentBanner />
+        </PreferencesProvider>
       </body>
     </html>
   );

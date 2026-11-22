@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { FileCheck2, ArrowRight, ShieldCheck, Download } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { Icon3D } from "@/components/ui/Icon3D";
 
 export const metadata = {
-  title: "Contratos Temporarios Art. 1199 CCyC | I-bita Argentina",
-  description: "Firma y consulta de contratos digitales de locación temporaria y media estadía.",
+  title: "Acuerdos Digitales de Alquiler | I-bita Argentina",
+  description:
+    "Acuerdos simples para estadías cortas (< 30 noches) y contratos digitales Art. 1199 para alquileres de 1 a 6 meses en Argentina.",
 };
 
 export default function ContratosIndexPage() {
@@ -11,55 +13,68 @@ export default function ContratosIndexPage() {
   const demoToken = "00000000-0000-4000-8000-000000000777";
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-12 space-y-8">
-      <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-8 space-y-4">
-        <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-400">
-          <ShieldCheck className="h-4 w-4" />
-          Marco Legal CCyC Art. 1199 · Sello Criptográfico SHA-256
+    <div className="mx-auto max-w-4xl px-4 py-10 space-y-6">
+      <section className="surface-card p-6 sm:p-10 space-y-6">
+        <div className="flex items-center gap-4">
+          <Icon3D name="contract" size="lg" />
+          <div className="space-y-1">
+            <span className="badge-consorcio-friendly inline-block rounded-full px-3 py-1 text-xs font-extrabold">
+              Acuerdos simples (&lt; 30 noches) y Contratos Art. 1199 (1 a 6 meses)
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+              Tu acuerdo digital, claro y sin trámites
+            </h1>
+          </div>
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight">
-          Módulo de Contratos Temporarios Digitales
-        </h1>
-        <p className="text-[var(--text-secondary)] text-base max-w-2xl">
-          En estadías de 30 a 180 noches (Media Estadía), I-bita genera automáticamente un contrato de locación temporaria en PDF, sellado en servidor con SHA-256 y firma electrónica de ambas partes.
+
+        <p className="text-sm sm:text-base text-[var(--text-secondary)] max-w-2xl leading-relaxed">
+          Para estadías cortas menores a 30 noches firmás un acuerdo simple en
+          1 minuto con las reglas de convivencia y precio cerrado. Para estadías
+          de 30 noches o más, preparamos tu contrato temporario bajo Art. 1199
+          en PDF, listo para firmar desde el celular o la compu.
         </p>
 
-        <div className="pt-4 flex flex-wrap gap-4">
+        <div className="flex flex-wrap gap-3 pt-1">
           <Link
             href={`/contratos/${demoBookingId}?token=${demoToken}`}
-            className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand-primary)] px-5 py-3 text-sm font-bold text-white shadow-md hover:bg-[var(--brand-primary-hover)] transition-colors"
+            className="btn-primary-3d inline-flex min-h-[48px] items-center gap-2 rounded-2xl px-6 py-3 text-sm font-extrabold"
           >
-            <FileCheck2 className="h-4 w-4" />
-            Abrir Contrato Demo (Media Estadía 60 días)
-            <ArrowRight className="h-4 w-4" />
+            <span>Ver ejemplo de contrato (60 días)</span>
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
 
           <Link
             href="/p/loft-luminoso-palermo-soho"
-            className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-3 text-sm font-semibold hover:bg-[var(--bg-secondary)] transition-colors"
+            className="btn-secondary-3d inline-flex min-h-[48px] items-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold"
           >
-            Ver Propiedad en Palermo
+            <span>Volver al departamento</span>
           </Link>
         </div>
-      </div>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-        <div className="rounded-2xl border border-[var(--border-subtle)] p-6 space-y-2 bg-[var(--bg-elevated)]">
-          <h3 className="font-bold text-base">1. Generación Server-Side</h3>
-          <p className="text-[var(--text-secondary)]">
-            El PDF se construye en servidor con <code>pdf-lib</code> incluyendo cláusulas legales argentinas, partes, canon y finalidad.
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div className="surface-card p-5 space-y-2">
+          <Icon3D name="contract" size="sm" />
+          <h2 className="font-extrabold text-base">1. Lectura en 1 minuto</h2>
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+            Resumimos los puntos esenciales: fechas, precio cerrado, garantía y
+            normas de convivencia.
           </p>
         </div>
-        <div className="rounded-2xl border border-[var(--border-subtle)] p-6 space-y-2 bg-[var(--bg-elevated)]">
-          <h3 className="font-bold text-base">2. Sellado SHA-256</h3>
-          <p className="text-[var(--text-secondary)]">
-            Se calcula el hash inmutable del documento. Cualquier alteración posterior invalida la integridad criptográfica.
+        <div className="surface-card p-5 space-y-2">
+          <Icon3D name="shield" size="sm" />
+          <h2 className="font-extrabold text-base">2. Documento inalterable</h2>
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+            Al firmarlo, el archivo queda protegido con un sello digital para que
+            nadie pueda modificarlo.
           </p>
         </div>
-        <div className="rounded-2xl border border-[var(--border-subtle)] p-6 space-y-2 bg-[var(--bg-elevated)]">
-          <h3 className="font-bold text-base">3. Almacenamiento Privado</h3>
-          <p className="text-[var(--text-secondary)]">
-            El archivo se guarda en un bucket privado de Supabase con URL prefirmada descargable solo por huéspedes autorizados o anfitriones.
+        <div className="surface-card p-5 space-y-2">
+          <Icon3D name="check" size="sm" />
+          <h2 className="font-extrabold text-base">3. Descarga privada</h2>
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
+            Solo vos y el anfitrión pueden descargar el PDF guardado de manera
+            segura en tu reserva.
           </p>
         </div>
       </div>

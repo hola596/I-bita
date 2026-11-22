@@ -1,46 +1,53 @@
 import Link from "next/link";
-import { CreditCard, ArrowRight, ShieldCheck, Coins } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { Icon3D } from "@/components/ui/Icon3D";
 
 export const metadata = {
-  title: "Checkout Bi-Monetario | I-bita Argentina",
-  description: "Pasarela de pago en Pesos Argentinos (Mercado Pago / Cuotas) y USDT (Polygon).",
+  title: "Pago Seguro en Pesos o USDT | I-bita Argentina",
+  description:
+    "Pagá tu estadía en Pesos Argentinos en cuotas o en USDT con total tranquilidad.",
 };
 
 export default function CheckoutIndexPage() {
   const demoBookingId = "00000000-0000-4000-8000-000000000100";
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-12 space-y-8">
-      <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-8 space-y-4">
-        <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/10 border border-blue-500/20 px-3.5 py-1 text-xs font-bold text-blue-700 dark:text-blue-400">
-          <CreditCard className="h-4 w-4" />
-          Pasarela Dual: ARS (Mercado Pago) + USDT (Polygon Escrow)
+    <div className="mx-auto max-w-4xl px-4 py-10 space-y-6">
+      <section className="surface-card p-6 sm:p-10 space-y-6">
+        <div className="flex items-center gap-4">
+          <Icon3D name="card" size="lg" />
+          <div className="space-y-1">
+            <span className="inline-block rounded-full bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] px-3 py-1 text-xs font-extrabold">
+              Pagos en pesos o en dólares digitales
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+              Elegí cómo querés pagar tu estadía
+            </h1>
+          </div>
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight">
-          Checkout Bi-Monetario
-        </h1>
-        <p className="text-[var(--text-secondary)] text-base max-w-2xl">
-          Pagá en Pesos Argentinos sin percepciones en 3 y 6 cuotas bancarias vía Mercado Pago o transferí USDT en la red Polygon verificado directamente en la blockchain con smart contracts.
+
+        <p className="text-sm sm:text-base text-[var(--text-secondary)] max-w-2xl leading-relaxed">
+          Podés abonar en pesos argentinos con Mercado Pago en hasta 6 cuotas, sin
+          recargo de dólar tarjeta, o pagar con USDT de forma directa y transparente.
         </p>
 
-        <div className="pt-4 flex flex-wrap gap-4">
+        <div className="flex flex-wrap gap-3 pt-2">
           <Link
             href={`/checkout/${demoBookingId}`}
-            className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand-primary)] px-5 py-3 text-sm font-bold text-white shadow-md hover:bg-[var(--brand-primary-hover)] transition-colors"
+            className="btn-primary-3d inline-flex min-h-[48px] items-center gap-2 rounded-2xl px-6 py-3 text-sm font-extrabold"
           >
-            <Coins className="h-4 w-4" />
-            Abrir Checkout Demo de Prueba
-            <ArrowRight className="h-4 w-4" />
+            <span>Probar pantalla de pago</span>
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Link>
 
           <Link
             href="/p/loft-luminoso-palermo-soho"
-            className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-3 text-sm font-semibold hover:bg-[var(--bg-secondary)] transition-colors"
+            className="btn-secondary-3d inline-flex min-h-[48px] items-center gap-2 rounded-2xl px-5 py-3 text-sm font-extrabold"
           >
-            Ver Propiedad en Palermo
+            <span>Volver al departamento</span>
           </Link>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

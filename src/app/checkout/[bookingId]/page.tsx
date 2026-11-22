@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { CreditCard, ShieldCheck, Lock } from "lucide-react";
+import { ArrowRight, MessageSquare } from "lucide-react";
 import {
   getArsCheckoutSummaryAction,
   getUsdtCheckoutSummaryAction,
   createArsCheckoutPreferenceAction,
 } from "@/modules/payments/actions";
+import { ArsCheckoutCard } from "@/components/booking/ArsCheckoutCard";
 import { UsdtCheckoutCard } from "@/components/booking/UsdtCheckoutCard";
+import { Icon3D } from "@/components/ui/Icon3D";
+import { getBookingHostResponseState } from "@/modules/hosts/response-sla";
+import { HostResponseWindowCard } from "@/components/host/HostResponseWindowCard";
+import { PartialHoldStatusCard } from "@/components/booking/PartialHoldStatusCard";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Pagar reserva · Motor Financiero Bi-Monetario · I-bita",
+  title: "Pagar tu reserva · I-bita",
   robots: { index: false, follow: false },
 };
 
@@ -20,13 +26,6 @@ interface CheckoutPageProps {
   searchParams: Promise<{ token?: string; status?: string; error?: string }>;
 }
 
-const STATUS_MESSAGES: Record<string, string> = {
-  success:
-    "Mercado Pago informó el pago. Tu reserva se confirma cuando recibimos la notificación firmada; recargá en unos segundos.",
-  pending: "Tu pago está pendiente de acreditación en Mercado Pago.",
-  failure: "El pago no se completó. Podés intentarlo nuevamente.",
-};
-
 export default async function CheckoutPage({
   params,
   searchParams,
@@ -34,32 +33,115 @@ export default async function CheckoutPage({
   const { bookingId } = await params;
   const { token, status, error } = await searchParams;
 
-  // Consultar primero el resumen para determinar la moneda pactada (ARS vs USDT)
-  const arsRes = await getArsCheckoutSummaryAction(bookingId, token ?? null);
+  const [arsRes, hostResponseState] = await Promise.all([
+    getArsCheckoutSummaryAction(bookingId, token ?? null),
+    getBookingHostResponseState(bookingId),
+  ]);
   if (!arsRes.ok) notFound();
   const arsSummary = arsRes.data;
 
-  // Si la reserva fue pactada en USDT, renderizar checkout on-chain en Polygon (Viem)
+  if (arsSummary.status === "PENDING_HOST_APPROVAL") {
+    return (
+      <div className="mx-auto max-w-xl px-4 py-10 space-y-6">
+        <section className="surface-card p-6 sm:p-8 space-y-5">
+          <div className="flex items-start gap-3.5">
+            <Icon3D name="calendar" size="lg" />
+            <div className="space-y-1.5">
+              <span className="inline-flex items-center rounded-full bg-amber-500/15 border border-amber-500/40 px-3 py-0.5 text-xs font-extrabold text-amber-900 dark:text-amber-300">
+                Paso previo en curso · Sin cobro aún
+              </span>
+              <h1 className="text-2xl font-extrabold tracking-tight">
+                Tu solicitud está esperando la entrevista con el anfitrión
+              </h1>
+            </div>
+          </div>
+
+          <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+            Recibimos tu pedido para <strong>{arsSummary.propertyTitle}</strong>{" "}
+            del <strong>{arsSummary.checkIn}</strong> al{" "}
+            <strong>{arsSummary.checkOut}</strong> ({arsSummary.nightsCount}{" "}
+            noches). El anfitrión conversará con vos dentro del centro de
+            Mensajes de I-bita antes de habilitar el pago.
+          </p>
+
+          <p className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 text-xs text-[var(--text-secondary)] leading-relaxed">
+            No se realizó ningún cargo todavía. Apenas el anfitrión apruebe tu
+            estadía larga, se va a habilitar el botón de pago seguro acá y en{" "}
+            <strong>Mi perfil</strong>.
+          </p>
+
+          <div className="flex flex-wrap gap-3 pt-1">
+            <Link
+              href={`/mensajes?booking=${bookingId}`}
+              className="btn-primary-3d inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl px-5 text-sm font-extrabold"
+            >
+              <MessageSquare className="h-4 w-4" aria-hidden="true" />
+              <span>Hablar con el anfitrión en Mensajes</span>
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+            <Link
+              href="/perfil"
+              className="btn-secondary-3d inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl px-5 text-sm font-extrabold"
+            >
+              <span>Seguir estado en Mi perfil</span>
+            </Link>
+            <Link
+              href="/"
+              className="btn-secondary-3d inline-flex min-h-[46px] items-center justify-center rounded-2xl px-5 text-sm font-extrabold"
+            >
+              Volver al inicio
+            </Link>
+          </div>
+        </section>
+
+        {hostResponseState && (
+          <HostResponseWindowCard
+            mode="booking-status"
+            bookingId={hostResponseState.bookingId}
+            hostName={hostResponseState.hostName}
+            bookingStatus={hostResponseState.bookingStatus}
+            windowSummary={hostResponseState}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Flujo USDT
   if (arsSummary.paymentCurrency === "USDT") {
     const usdtRes = await getUsdtCheckoutSummaryAction(bookingId, token ?? null);
     if (!usdtRes.ok) notFound();
     const usdtSummary = usdtRes.data;
 
     return (
-      <main className="mx-auto max-w-xl px-4 py-8 space-y-6">
-        <header className="space-y-2">
-          <span className="badge-consorcio-friendly inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-extrabold">
-            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            Custodia Escrow · Red Polygon (USDT)
-          </span>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-            Checkout en Stablecoins
-          </h1>
+      <div className="mx-auto max-w-xl px-4 py-8 space-y-6">
+        <header className="surface-card p-6 space-y-3">
+          <div className="flex items-center gap-3.5">
+            <Icon3D name="coin" size="lg" />
+            <div className="space-y-1">
+              <span className="badge-consorcio-friendly inline-flex items-center rounded-full px-3 py-0.5 text-xs font-extrabold">
+                Pago en dólares digitales (USDT)
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                Completá tu transferencia
+              </h1>
+            </div>
+          </div>
           <p className="text-sm text-[var(--text-secondary)]">
-            {usdtSummary.propertyTitle} · {usdtSummary.checkIn} al {usdtSummary.checkOut} (
-            {usdtSummary.nightsCount} noches)
+            {usdtSummary.propertyTitle} · Del {usdtSummary.checkIn} al{" "}
+            {usdtSummary.checkOut} ({usdtSummary.nightsCount} noches)
           </p>
         </header>
+
+        <PartialHoldStatusCard
+          propertySlug={usdtSummary.propertySlug}
+          status={usdtSummary.status}
+          holdExpiresAt={usdtSummary.holdExpiresAt}
+          hostConfirmedAt={usdtSummary.hostConfirmedAt}
+          checkIn={usdtSummary.checkIn}
+          checkOut={usdtSummary.checkOut}
+          nightsCount={usdtSummary.nightsCount}
+        />
 
         <UsdtCheckoutCard
           bookingId={usdtSummary.bookingId}
@@ -77,7 +159,17 @@ export default async function CheckoutPage({
           payable={usdtSummary.payable}
           status={usdtSummary.status}
         />
-      </main>
+
+        {hostResponseState && (
+          <HostResponseWindowCard
+            mode="booking-status"
+            bookingId={hostResponseState.bookingId}
+            hostName={hostResponseState.hostName}
+            bookingStatus={hostResponseState.bookingStatus}
+            windowSummary={hostResponseState}
+          />
+        )}
+      </div>
     );
   }
 
@@ -99,66 +191,55 @@ export default async function CheckoutPage({
   }
 
   return (
-    <main className="mx-auto max-w-xl px-4 py-8 space-y-6">
-      <header className="space-y-2">
-        <span className="badge-consorcio-friendly inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-xs font-extrabold">
-          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-          Pago seguro en pesos · Mercado Pago
-        </span>
-        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-          Pagar tu reserva
-        </h1>
+    <div className="mx-auto max-w-xl px-4 py-8 space-y-6">
+      <header className="surface-card p-6 space-y-3">
+        <div className="flex items-center gap-3.5">
+          <Icon3D name="card" size="lg" />
+          <div className="space-y-1">
+            <span className="badge-consorcio-friendly inline-flex items-center rounded-full px-3 py-0.5 text-xs font-extrabold">
+              Pago protegido en pesos · Mercado Pago
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+              Confirmá el pago de tu reserva
+            </h1>
+          </div>
+        </div>
         <p className="text-sm text-[var(--text-secondary)]">
-          {arsSummary.propertyTitle} · {arsSummary.checkIn} al {arsSummary.checkOut} (
-          {arsSummary.nightsCount} noches)
+          {arsSummary.propertyTitle} · Del {arsSummary.checkIn} al{" "}
+          {arsSummary.checkOut} ({arsSummary.nightsCount} noches)
         </p>
       </header>
 
-      {status && STATUS_MESSAGES[status] && (
-        <p role="status" className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-sm font-semibold">
-          {STATUS_MESSAGES[status]}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="rounded-xl border-2 border-red-900 bg-red-50 p-3 text-sm font-bold text-red-950">
-          {error}
-        </p>
-      )}
+      <PartialHoldStatusCard
+        propertySlug={arsSummary.propertySlug}
+        status={arsSummary.status}
+        holdExpiresAt={arsSummary.holdExpiresAt}
+        hostConfirmedAt={arsSummary.hostConfirmedAt}
+        checkIn={arsSummary.checkIn}
+        checkOut={arsSummary.checkOut}
+        nightsCount={arsSummary.nightsCount}
+      />
 
-      <section
-        aria-labelledby="amount-heading"
-        className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5 space-y-3"
-      >
-        <h2 id="amount-heading" className="text-sm font-bold uppercase tracking-wide">
-          Total a pagar
-        </h2>
-        <p className="text-4xl font-black" data-testid="ars-amount">
-          {formattedAmount}
-        </p>
-        <p className="text-xs text-[var(--text-secondary)]">
-          Pagás con QR, MODO o saldo en cuenta, o en hasta {arsSummary.maxInstallments}{" "}
-          cuotas (3 y 6) según tu medio de pago. El costo financiero lo informa
-          Mercado Pago antes de confirmar.
-        </p>
+      <ArsCheckoutCard
+        bookingId={bookingId}
+        token={token ?? null}
+        status={status}
+        error={error}
+        formattedAmount={formattedAmount}
+        maxInstallments={arsSummary.maxInstallments}
+        payable={arsSummary.payable}
+        onStartMercadoPago={startMercadoPagoCheckout}
+      />
 
-        {arsSummary.payable ? (
-          <form action={startMercadoPagoCheckout}>
-            <button
-              type="submit"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 py-3 text-base font-extrabold text-white hover:bg-emerald-900 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-emerald-950"
-            >
-              <CreditCard className="h-5 w-5" aria-hidden="true" />
-              Pagar con Mercado Pago
-            </button>
-          </form>
-        ) : (
-          <p className="inline-flex items-center gap-1.5 text-sm font-bold">
-            <Lock className="h-4 w-4" aria-hidden="true" />
-            Esta reserva no admite pago ARS en este momento (estado{" "}
-            <code>{arsSummary.status}</code>, moneda {arsSummary.paymentCurrency}).
-          </p>
-        )}
-      </section>
-    </main>
+      {hostResponseState && (
+        <HostResponseWindowCard
+          mode="booking-status"
+          bookingId={hostResponseState.bookingId}
+          hostName={hostResponseState.hostName}
+          bookingStatus={hostResponseState.bookingStatus}
+          windowSummary={hostResponseState}
+        />
+      )}
+    </div>
   );
 }

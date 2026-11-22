@@ -11,11 +11,17 @@ import {
   Wifi,
   Users,
   Building2,
-  CheckCircle2,
   AlertCircle,
   Trash2,
   Pencil,
+  MapPin,
+  Minus,
+  LayoutGrid,
+  Calendar,
 } from "lucide-react";
+import { getArgentinaTodayYmd } from "@/lib/calendar/availability";
+import { PropertyAvailabilityCalendar } from "@/components/booking/PropertyAvailabilityCalendar";
+import { HostBookingConfirmationsPanel } from "./HostBookingConfirmationsPanel";
 import {
   createPropertyAction,
   updatePropertyAction,
@@ -32,10 +38,29 @@ import {
   type PropertyCurrency,
   type PropertyImageItem,
 } from "@/modules/properties/validators";
-import type { SafePropertyRecord } from "@/modules/properties/queries";
+import type {
+  OccupiedDateRange,
+  SafePropertyRecord,
+} from "@/modules/properties/queries";
+import {
+  cloneDefaultMidTermPolicy,
+  normalizeMidTermPolicy,
+  type MidTermPolicy,
+} from "@/modules/properties/mid-term-policy";
 import type { HostConsortiumConfigRecord } from "@/modules/consortium/actions";
+import type {
+  HostBookingConfirmationItem,
+  HostMidTermApplicationItem,
+} from "@/modules/bookings/host-approval-actions";
+import type { HostEarningsSummary } from "@/lib/math/host-earnings";
+import { HostEarningsPanel } from "@/components/host/HostEarningsPanel";
 import { PropertyIcalSyncPanel } from "./PropertyIcalSyncPanel";
 import { ConsortiumConfigPanel } from "./ConsortiumConfigPanel";
+import { MidTermPolicyEditor } from "./MidTermPolicyEditor";
+import { HostMidTermApplicationsPanel } from "./HostMidTermApplicationsPanel";
+import { ProgressiveFlowShell } from "@/components/ui/ProgressiveFlowShell";
+import { AchievementBanner } from "@/components/ui/AchievementBanner";
+import { usePreferences } from "@/components/providers/PreferencesProvider";
 
 const DEFAULT_COVER_PHOTO: PropertyImageItem = {
   url: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
@@ -66,17 +91,96 @@ const CURATED_OPTIMIZED_PHOTOS: readonly [PropertyImageItem, ...PropertyImageIte
   },
 ];
 
+const WIZARD_STEP_META: ReadonlyArray<{
+  shortLabel: string;
+  createTitle: string;
+  editTitle: string;
+  subtitle: string;
+  imageUrl: string;
+  imageAlt: string;
+  badge: string;
+}> = [
+  {
+    shortLabel: "Dirección y zona",
+    createTitle: "Configurá tu anuncio en I-bita",
+    editTitle: "Editá la ubicación de tu anuncio",
+    subtitle:
+      "Crear un anuncio excelente es muy sencillo. Comencemos con tu dirección.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    imageAlt: "Departamento luminoso listo para recibir huéspedes",
+    badge: "Paso 1 · Dirección y edificio",
+  },
+  {
+    shortLabel: "Presentación y capacidad",
+    createTitle: "Contanos cómo es tu alojamiento",
+    editTitle: "Actualizá la presentación y capacidad",
+    subtitle:
+      "Elegí un título claro, describí el espacio y definí cuántos adultos entran.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    imageAlt: "Dormitorio equipado para estadías cómodas",
+    badge: "Paso 2 · Tu anuncio",
+  },
+  {
+    shortLabel: "Tarifa y cuotas",
+    createTitle: "Ahora definí tu precio por noche",
+    editTitle: "Ajustá tu precio y descuento mensual",
+    subtitle:
+      "Mostrá un valor claro y ofrecé un descuento para estadías de 1 a 6 meses.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    imageAlt: "Ambiente moderno para alquiler temporario o mensual",
+    badge: "Paso 3 · Precios en Pesos y USDT",
+  },
+  {
+    shortLabel: "Estadías de 1 a 6 meses",
+    createTitle: "Reglas para estadías de 1 a 6 meses",
+    editTitle: "Editá tus reglas de estadía larga",
+    subtitle:
+      "Elegí si confirmás al instante o con entrevista previa y personalizá los requisitos.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1556911220-bff31c812dba?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    imageAlt: "Cocina integrada pensada para estadías prolongadas",
+    badge: "Paso 4 · Aprobación y requisitos",
+  },
+  {
+    shortLabel: "Fotos del espacio",
+    createTitle: "Sumá fotos luminosas de tu espacio",
+    editTitle: "Actualizá las fotos de tu espacio",
+    subtitle:
+      "Necesitás al menos 1 foto (hasta 10). Las optimizamos automáticamente.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    imageAlt: "Interior cuidado con detalles de confort",
+    badge: "Paso 5 · Galería rápida",
+  },
+  {
+    shortLabel: "Clave de entrada",
+    createTitle: "Último paso: tu clave protegida de entrada",
+    editTitle: "Revisá tu clave y guardá los cambios",
+    subtitle:
+      "Se encripta antes de guardarse y solo se entrega a huéspedes con pago e identidad validados.",
+    imageUrl:
+      "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    imageAlt: "Ingreso cuidado para el edificio y tus huéspedes",
+    badge: "Paso 6 · Publicación protegida",
+  },
+];
+
 interface PropertyDashboardClientProps {
   initialHostProperties: SafePropertyRecord[];
   initialPublicProperties: SafePropertyRecord[];
   initialConsortiumConfigs?: Record<string, HostConsortiumConfigRecord>;
+  initialMidTermApplications?: HostMidTermApplicationItem[];
+  initialBookingConfirmations?: HostBookingConfirmationItem[];
+  occupiedRangesByProperty?: Record<string, OccupiedDateRange[]>;
+  todayYmd?: string;
+  initialHostEarnings?: HostEarningsSummary;
+  payoutSplitArsPct?: number;
   authenticatedEmail: string | null;
 }
 
-/**
- * Optimiza en el navegador cualquier imagen válida a formato WebP (1200x900, relación 4:3)
- * para garantizar CLS = 0 y bajo peso antes de subirla a Supabase Storage.
- */
 async function optimizeImageFileToWebp(file: File): Promise<File> {
   if (typeof window === "undefined") return file;
 
@@ -97,7 +201,6 @@ async function optimizeImageFileToWebp(file: File): Promise<File> {
         return;
       }
 
-      // Recorte centrado aspect-ratio 4:3 para evitar deformación y garantizar CLS = 0
       const srcRatio = img.width / img.height;
       const dstRatio = targetWidth / targetHeight;
       let sx = 0;
@@ -144,8 +247,19 @@ export function PropertyDashboardClient({
   initialHostProperties,
   initialPublicProperties,
   initialConsortiumConfigs = {},
+  initialMidTermApplications = [],
+  initialBookingConfirmations = [],
+  occupiedRangesByProperty = {},
+  todayYmd = getArgentinaTodayYmd(),
+  initialHostEarnings,
+  payoutSplitArsPct = 100,
   authenticatedEmail,
 }: PropertyDashboardClientProps) {
+  const { notify } = usePreferences();
+  const [expandedCalendarPropIds, setExpandedCalendarPropIds] = useState<
+    Record<string, boolean>
+  >({});
+
   const [hostProperties, setHostProperties] = useState<SafePropertyRecord[]>(
     initialHostProperties
   );
@@ -155,6 +269,15 @@ export function PropertyDashboardClient({
   const [consortiumConfigs, setConsortiumConfigs] = useState<
     Record<string, HostConsortiumConfigRecord>
   >(initialConsortiumConfigs);
+
+  const [activeView, setActiveView] = useState<"wizard" | "manage">(
+    initialHostProperties.length > 0 ? "manage" : "wizard"
+  );
+  const [wizardStep, setWizardStep] = useState<number>(0);
+  const [wizardDirection, setWizardDirection] = useState<"forward" | "backward">(
+    "forward"
+  );
+  const [showSlugEditor, setShowSlugEditor] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -172,6 +295,9 @@ export function PropertyDashboardClient({
   const [absorbInstallmentsCost, setAbsorbInstallmentsCost] = useState(true);
   const [acceptsUsdt, setAcceptsUsdt] = useState(true);
   const [accessCodePlain, setAccessCodePlain] = useState("");
+  const [midTermPolicy, setMidTermPolicy] = useState<MidTermPolicy>(() =>
+    cloneDefaultMidTermPolicy()
+  );
   const [images, setImages] = useState<PropertyImageItem[]>([
     CURATED_OPTIMIZED_PHOTOS[0],
   ]);
@@ -186,6 +312,7 @@ export function PropertyDashboardClient({
   const [formStatus, setFormStatus] = useState<{
     type: "idle" | "loading" | "success" | "error";
     message?: string;
+    savedSlug?: string;
   }>({ type: "idle" });
 
   function handleTitleChange(val: string) {
@@ -212,8 +339,12 @@ export function PropertyDashboardClient({
     setAbsorbInstallmentsCost(prop.absorb_installments_cost);
     setAcceptsUsdt(prop.accepts_usdt);
     setAccessCodePlain("");
+    setMidTermPolicy(normalizeMidTermPolicy(prop.mid_term_policy));
     setImages(prop.images.length > 0 ? prop.images : [CURATED_OPTIMIZED_PHOTOS[0]]);
     setFormStatus({ type: "idle" });
+    setWizardDirection("forward");
+    setWizardStep(0);
+    setActiveView("wizard");
   }
 
   function resetForm() {
@@ -233,7 +364,39 @@ export function PropertyDashboardClient({
     setAbsorbInstallmentsCost(true);
     setAcceptsUsdt(true);
     setAccessCodePlain("");
+    setMidTermPolicy(cloneDefaultMidTermPolicy());
     setImages([CURATED_OPTIMIZED_PHOTOS[0]]);
+    setShowSlugEditor(false);
+  }
+
+  const stepValidations: readonly boolean[] = [
+    addressLine.trim().length >= 5 && unitIdentifier.trim().length >= 1,
+    title.trim().length >= 5 &&
+      slug.trim().length >= 3 &&
+      description.trim().length >= 20 &&
+      maxAdults >= 1,
+    Number(nightlyRate) > 0 &&
+      Number(monthlyDiscountPct) >= 15 &&
+      Number(monthlyDiscountPct) <= 50,
+    midTermPolicy.approvalMode !== "HOST_APPROVAL_INTERVIEW" ||
+      midTermPolicy.interviewChannels.length >= 1,
+    images.length >= 1,
+    Boolean(editingId) || accessCodePlain.trim().length >= 4,
+  ];
+
+  function handleWizardNext() {
+    if (wizardStep >= WIZARD_STEP_META.length - 1) return;
+    if (!stepValidations[wizardStep]) return;
+    setFormStatus({ type: "idle" });
+    setWizardDirection("forward");
+    setWizardStep((s) => Math.min(s + 1, WIZARD_STEP_META.length - 1));
+  }
+
+  function handleWizardBack() {
+    if (wizardStep <= 0) return;
+    setFormStatus({ type: "idle" });
+    setWizardDirection("backward");
+    setWizardStep((s) => Math.max(0, s - 1));
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -242,7 +405,6 @@ export function PropertyDashboardClient({
 
     setPhotoFeedback({ type: "idle" });
 
-    // Validación estricta en cliente de formato MIME y peso máximo (5 MB)
     if (
       !ALLOWED_IMAGE_MIME_TYPES.includes(
         rawFile.type as (typeof ALLOWED_IMAGE_MIME_TYPES)[number]
@@ -250,7 +412,7 @@ export function PropertyDashboardClient({
     ) {
       setPhotoFeedback({
         type: "error",
-        message: `Formato "${rawFile.type || "desconocido"}" rechazado. Solo se admiten imágenes WebP, AVIF, JPEG o PNG.`,
+        message: `Formato "${rawFile.type || "desconocido"}" no admitido. Usá WebP, AVIF, JPEG o PNG.`,
       });
       e.target.value = "";
       return;
@@ -259,7 +421,7 @@ export function PropertyDashboardClient({
     if (rawFile.size > MAX_IMAGE_SIZE_BYTES) {
       setPhotoFeedback({
         type: "error",
-        message: `El archivo pesa ${(rawFile.size / (1024 * 1024)).toFixed(2)} MB y supera el máximo permitido de 5 MB.`,
+        message: `El archivo pesa ${(rawFile.size / (1024 * 1024)).toFixed(2)} MB y supera el máximo de 5 MB.`,
       });
       e.target.value = "";
       return;
@@ -274,7 +436,7 @@ export function PropertyDashboardClient({
         "alt",
         photoAltInput.trim().length >= 3
           ? photoAltInput.trim()
-          : `${title || "Unidad Funcional"} — Fotografía optimizada`
+          : `${title || "Propiedad I-bita"} — Fotografía optimizada`
       );
       fd.set("width", "1200");
       fd.set("height", "900");
@@ -290,7 +452,7 @@ export function PropertyDashboardClient({
         setPhotoAltInput("");
         setPhotoFeedback({
           type: "success",
-          message: `Fotografía optimizada en WebP (${res.data.width}x${res.data.height}px, ${(res.data.sizeBytes / 1024).toFixed(0)} KB, CLS = 0) subida a Supabase Storage.`,
+          message: `Foto optimizada (${res.data.width}x${res.data.height}px, ${(res.data.sizeBytes / 1024).toFixed(0)} KB) agregada a la galería.`,
         });
       }
     } finally {
@@ -301,6 +463,11 @@ export function PropertyDashboardClient({
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (wizardStep < WIZARD_STEP_META.length - 1) {
+      handleWizardNext();
+      return;
+    }
+
     setFormStatus({ type: "loading" });
 
     if (editingId) {
@@ -319,6 +486,7 @@ export function PropertyDashboardClient({
         wifi_speed_mbps: Number(wifiSpeedMbps),
         absorb_installments_cost: absorbInstallmentsCost,
         accepts_usdt: acceptsUsdt,
+        midTermPolicy,
         images,
         ...(accessCodePlain.trim().length >= 4
           ? { accessCodePlain: accessCodePlain.trim() }
@@ -338,9 +506,12 @@ export function PropertyDashboardClient({
       );
       setFormStatus({
         type: "success",
-        message: `Unidad Funcional "${res.data.title}" actualizada. PIN protegido con AES-256-GCM (AAD=${res.data.id}).`,
+        message: `¡Actualizamos "${res.data.title}"! Sus condiciones de estadía larga y su clave resguardada ya están vigentes.`,
+        savedSlug: res.data.slug,
       });
+      notify("¡Propiedad actualizada con éxito!", "celebration", "trophy");
       resetForm();
+      setWizardStep(0);
       return;
     }
 
@@ -358,6 +529,7 @@ export function PropertyDashboardClient({
       wifi_speed_mbps: Number(wifiSpeedMbps),
       absorb_installments_cost: absorbInstallmentsCost,
       accepts_usdt: acceptsUsdt,
+      midTermPolicy,
       images,
       accessCodePlain,
       is_published: true,
@@ -372,648 +544,932 @@ export function PropertyDashboardClient({
     setPublicProperties((prev) => [res.data, ...prev]);
     setFormStatus({
       type: "success",
-      message: `¡Unidad Funcional "${res.data.title}" creada en Supabase Cloud! Código de cerradura cifrado en servidor con AES-256-GCM (IV 12B + AuthTag 16B + AAD propertyId=${res.data.id}). Link directo: /p/${res.data.slug}`,
+      message: `¡Publicaste "${res.data.title}"! Ya podés compartir el enlace directo /p/${res.data.slug}.`,
+      savedSlug: res.data.slug,
     });
+    notify("¡Tu anuncio ya está publicado en I-bita!", "celebration", "trophy");
     resetForm();
+    setWizardStep(0);
   }
 
   const displayedProperties =
     hostProperties.length > 0 ? hostProperties : publicProperties;
+  const activeMeta = WIZARD_STEP_META[wizardStep] ?? WIZARD_STEP_META[0]!;
+  const enabledReqCount = midTermPolicy.requirements.filter(
+    (r) => r.enabled
+  ).length;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-      {/* Columna Izquierda: Formulario de Alta / Edición de Unidad Funcional */}
-      <section
-        aria-labelledby="form-property-heading"
-        className="lg:col-span-7 rounded-3xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 sm:p-8 shadow-xs space-y-6"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-4">
-          <div>
-            <span className="badge-consorcio-friendly inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold">
-              <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-              Zero-Trust Consorcial · AES-256-GCM Server-Only
-            </span>
-            <h2 id="form-property-heading" className="text-2xl font-extrabold pt-2">
-              {editingId
-                ? "Editar Unidad Funcional"
-                : "Dar de Alta Nueva Unidad Funcional"}
-            </h2>
-          </div>
-          {editingId && (
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded-xl border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-bold hover:bg-[var(--bg-secondary)] cursor-pointer"
-            >
-              Cancelar edición
-            </button>
-          )}
+    <div className="space-y-8">
+      {/* Barra superior de modo: Asistente paso a paso vs Gestión de propiedades y solicitudes */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div
+          role="tablist"
+          aria-label="Cambiar entre publicar y administrar propiedades"
+          className="inline-flex rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1 text-xs font-extrabold"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === "manage"}
+            onClick={() => setActiveView("manage")}
+            className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4 transition-colors cursor-pointer ${
+              activeView === "manage"
+                ? "bg-[var(--bg-primary)] text-[var(--brand-primary)] shadow-xs border border-[var(--border-subtle)]"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Mis propiedades y entrevistas ({displayedProperties.length})</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === "wizard"}
+            onClick={() => {
+              setFormStatus({ type: "idle" });
+              setActiveView("wizard");
+            }}
+            className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4 transition-colors cursor-pointer ${
+              activeView === "wizard"
+                ? "bg-[var(--brand-primary)] text-white shadow-xs"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{editingId ? "Editando anuncio" : "Publicar nueva propiedad"}</span>
+          </button>
         </div>
 
-        {!authenticatedEmail && (
-          <div
-            role="status"
-            className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs space-y-1.5"
+        {editingId && activeView === "wizard" && (
+          <button
+            type="button"
+            onClick={() => {
+              resetForm();
+              setWizardStep(0);
+              setActiveView("manage");
+            }}
+            className="btn-secondary-3d rounded-xl px-3.5 py-2 text-xs font-extrabold"
           >
-            <p className="font-bold">
-              Modo Vista Previa — Sesión de Anfitrión requerida para guardar en Supabase RLS
-            </p>
-            <p className="text-[var(--text-secondary)]">
-              Para insertar con tu propio <code>auth.uid() = host_id</code>, primero{" "}
-              <a href="/login" className="underline font-bold text-[var(--brand-primary)]">
-                iniciá sesión en /login
-              </a>{" "}
-              y completá tu{" "}
-              <a
-                href="/onboarding/anfitrion"
-                className="underline font-bold text-[var(--brand-primary)]"
-              >
-                Onboarding Fiscal/Web3
-              </a>
-              .
-            </p>
-          </div>
+            Cancelar edición
+          </button>
         )}
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="prop-title" className="block text-sm font-bold mb-1">
-                Título de la Unidad Funcional *
-              </label>
-              <input
-                id="prop-title"
-                name="title"
-                type="text"
-                required
-                minLength={5}
-                maxLength={140}
-                value={title}
-                onChange={(e) => handleTitleChange(e.target.value)}
-                placeholder="Ej: Studio Luminoso Palermo Soho"
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-              />
+      {formStatus.type === "success" && (
+        <AchievementBanner
+          icon="trophy"
+          tone="emerald"
+          title="¡Listo! Anuncio guardado"
+          description={formStatus.message ?? "Tu publicación quedó vigente."}
+          action={
+            formStatus.savedSlug
+              ? {
+                  label: "Ver mi anuncio publicado",
+                  href: `/p/${formStatus.savedSlug}`,
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {activeView === "wizard" ? (
+        <div className="surface-card overflow-hidden">
+          {!authenticatedEmail && (
+            <div
+              role="status"
+              className="mx-6 mt-6 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs space-y-1"
+            >
+              <p className="font-bold">
+                Modo vista previa — Iniciá sesión como anfitrión aprobado para guardar
+              </p>
+              <p className="text-[var(--text-secondary)]">
+                Ingresá en{" "}
+                <a href="/login" className="underline font-bold text-[var(--brand-primary)]">
+                  /login
+                </a>{" "}
+                o completá tu{" "}
+                <a
+                  href="/onboarding/anfitrion"
+                  className="underline font-bold text-[var(--brand-primary)]"
+                >
+                  registro de anfitrión
+                </a>
+                .
+              </p>
             </div>
+          )}
 
-            <div>
-              <label htmlFor="prop-slug" className="block text-sm font-bold mb-1">
-                Slug de Reserva Directa (<code>/p/[slug]</code>) *
-              </label>
-              <input
-                id="prop-slug"
-                name="slug"
-                type="text"
-                required
-                minLength={3}
-                maxLength={120}
-                value={slug}
-                onChange={(e) => {
-                  setSlugManuallyEdited(true);
-                  setSlug(slugifyPropertyTitle(e.target.value));
-                }}
-                placeholder="studio-luminoso-palermo-soho"
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label htmlFor="prop-corridor" className="block text-sm font-bold mb-1">
-                Corredor Geográfico *
-              </label>
-              <select
-                id="prop-corridor"
-                name="corridor"
-                value={corridor}
-                onChange={(e) => setCorridor(e.target.value as PropertyCorridor)}
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-              >
-                {PROPERTY_CORRIDORS.map((c) => (
-                  <option key={c} value={c}>
-                    {CORRIDOR_LABELS[c]}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="prop-address" className="block text-sm font-bold mb-1">
-                Dirección del Edificio *
-              </label>
-              <input
-                id="prop-address"
-                name="addressLine"
-                type="text"
-                required
-                minLength={5}
-                value={addressLine}
-                onChange={(e) => setAddressLine(e.target.value)}
-                placeholder="Thames 1845, Palermo"
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="prop-unit" className="block text-sm font-bold mb-1">
-                Piso / Unidad Funcional *
-              </label>
-              <input
-                id="prop-unit"
-                name="unitIdentifier"
-                type="text"
-                required
-                value={unitIdentifier}
-                onChange={(e) => setUnitIdentifier(e.target.value)}
-                placeholder="Piso 4 Depto B (UF 14)"
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label htmlFor="prop-description" className="block text-sm font-bold mb-1">
-              Descripción Completa y Reglas de Convivencia Consorcial *
-            </label>
-            <textarea
-              id="prop-description"
-              name="description"
-              required
-              minLength={20}
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Departamento equipado para estadías cortas y media estadía (1 a 6 meses). Edificio Consorcio Friendly con seguridad 24h y Wi-Fi fibra simétrica."
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <label htmlFor="prop-adults" className="block text-xs font-bold mb-1">
-                Capacidad Máx. Adultos *
-              </label>
-              <input
-                id="prop-adults"
-                name="maxAdults"
-                type="number"
-                min={1}
-                max={20}
-                required
-                value={maxAdults}
-                onChange={(e) => setMaxAdults(Number(e.target.value))}
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="prop-currency" className="block text-xs font-bold mb-1">
-                Moneda Base *
-              </label>
-              <select
-                id="prop-currency"
-                name="baseCurrency"
-                value={baseCurrency}
-                onChange={(e) => setBaseCurrency(e.target.value as PropertyCurrency)}
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm"
-              >
-                {PROPERTY_CURRENCIES.map((curr) => (
-                  <option key={curr} value={curr}>
-                    {curr}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="prop-rate" className="block text-xs font-bold mb-1">
-                Tarifa por Noche *
-              </label>
-              <input
-                id="prop-rate"
-                name="nightlyRate"
-                type="number"
-                min={1}
-                step="0.01"
-                required
-                value={nightlyRate}
-                onChange={(e) => setNightlyRate(Number(e.target.value))}
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="prop-discount" className="block text-xs font-bold mb-1">
-                Dto. Media Estadía (15–50%) *
-              </label>
-              <input
-                id="prop-discount"
-                name="monthlyDiscountPct"
-                type="number"
-                min={15}
-                max={50}
-                required
-                value={monthlyDiscountPct}
-                onChange={(e) => setMonthlyDiscountPct(Number(e.target.value))}
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-            <div>
-              <label htmlFor="prop-wifi" className="block text-xs font-bold mb-1">
-                Wi-Fi Verificado (Mbps)
-              </label>
-              <input
-                id="prop-wifi"
-                name="wifiSpeedMbps"
-                type="number"
-                min={1}
-                max={10000}
-                value={wifiSpeedMbps}
-                onChange={(e) => setWifiSpeedMbps(Number(e.target.value))}
-                className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1.5 text-sm"
-              />
-            </div>
-
-            <label className="flex items-center gap-2.5 text-xs font-bold cursor-pointer pt-3 sm:pt-0">
-              <input
-                type="checkbox"
-                checked={absorbInstallmentsCost}
-                onChange={(e) => setAbsorbInstallmentsCost(e.target.checked)}
-                className="h-4 w-4 accent-[var(--brand-primary)]"
-              />
-              <span>Ofrecer 3 y 6 Cuotas ARS</span>
-            </label>
-
-            <label className="flex items-center gap-2.5 text-xs font-bold cursor-pointer">
-              <input
-                type="checkbox"
-                checked={acceptsUsdt}
-                onChange={(e) => setAcceptsUsdt(e.target.checked)}
-                className="h-4 w-4 accent-[var(--brand-primary)]"
-              />
-              <span>Aceptar USDT (Polygon)</span>
-            </label>
-          </div>
-
-          {/* Sección Crítica: PIN de Cerradura Cifrado con AES-256-GCM + AAD */}
-          <div className="rounded-2xl border-2 border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/40 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <label htmlFor="prop-pin" className="flex items-center gap-2 text-sm font-extrabold">
-                <Lock className="h-4 w-4 text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
-                PIN / Instrucciones de Cerradura Electrónica {editingId ? "(Opcional al editar)" : "*"}
-              </label>
-              <span className="text-[11px] font-mono font-bold text-emerald-800 dark:text-emerald-300">
-                AES-256-GCM · 12B IV · 16B Tag · AAD=propertyId
-              </span>
-            </div>
-            <input
-              id="prop-pin"
-              name="accessCodePlain"
-              type="password"
-              required={!editingId}
-              minLength={4}
-              maxLength={240}
-              value={accessCodePlain}
-              onChange={(e) => setAccessCodePlain(e.target.value)}
-              placeholder={
-                editingId
-                  ? "Dejar en blanco para conservar el PIN cifrado actual o ingresar uno nuevo..."
-                  : "Ej: PIN Cerradura Yale #8492* — Caja de seguridad lobby código 1940"
+          <form onSubmit={handleSubmit} noValidate>
+            <ProgressiveFlowShell
+              eyebrow={`Paso ${wizardStep + 1} de ${WIZARD_STEP_META.length} · ${activeMeta.shortLabel}`}
+              title={editingId ? activeMeta.editTitle : activeMeta.createTitle}
+              subtitle={activeMeta.subtitle}
+              currentStep={wizardStep}
+              totalSteps={WIZARD_STEP_META.length}
+              direction={wizardDirection}
+              mediaImageUrl={
+                wizardStep === 4 && images[0]?.url
+                  ? images[0].url
+                  : activeMeta.imageUrl
               }
-              className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 py-2.5 text-sm font-mono"
-            />
-            <p className="text-xs text-[var(--text-secondary)]">
-              Se cifra exclusivamente en el servidor (<code>server-only</code>) antes del <code>INSERT</code>. Jamás se almacena en texto plano ni se expone hasta que el 100% de los adultos declarados alcancen <code>ALL_ADULTS_VERIFIED</code>.
-            </p>
-          </div>
+              mediaImageAlt={activeMeta.imageAlt}
+              mediaBadge={activeMeta.badge}
+              mediaCaption={
+                addressLine.trim()
+                  ? `${addressLine}${unitIdentifier.trim() ? ` · ${unitIdentifier}` : ""}`
+                  : undefined
+              }
+              canGoBack={wizardStep > 0}
+              onBack={handleWizardBack}
+              canGoNext={Boolean(stepValidations[wizardStep])}
+              onNext={
+                wizardStep < WIZARD_STEP_META.length - 1
+                  ? handleWizardNext
+                  : undefined
+              }
+              nextLabel="Siguiente"
+              submitButtonLabel={
+                wizardStep === WIZARD_STEP_META.length - 1
+                  ? editingId
+                    ? "Guardar cambios de la propiedad"
+                    : "Publicar propiedad"
+                  : undefined
+              }
+              isSubmitting={formStatus.type === "loading"}
+              submittingLabel="Guardando tu propiedad de forma segura..."
+            >
+              {/* PASO 0: DIRECCIÓN Y ZONA (ESTILO AIRBNB) */}
+              {wizardStep === 0 && (
+                <div className="space-y-4">
+                  <div className="relative">
+                    <MapPin
+                      className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--brand-primary)]"
+                      aria-hidden="true"
+                    />
+                    <input
+                      id="prop-address"
+                      name="addressLine"
+                      type="text"
+                      required
+                      minLength={5}
+                      value={addressLine}
+                      onChange={(e) => setAddressLine(e.target.value)}
+                      placeholder="Ingresá tu dirección (ej: Thames 1845, Palermo)"
+                      className="min-h-[54px] w-full rounded-full border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] pl-12 pr-5 py-3 text-sm sm:text-base font-semibold focus:border-[var(--brand-primary)] focus:outline-none"
+                    />
+                  </div>
 
-          {/* Sección de Carga y Optimización de Fotografías (CLS = 0) */}
-          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <label
+                      htmlFor="prop-unit"
+                      className="block text-xs font-extrabold mb-1.5"
+                    >
+                      Piso / Departamento / Unidad *
+                    </label>
+                    <input
+                      id="prop-unit"
+                      name="unitIdentifier"
+                      type="text"
+                      required
+                      value={unitIdentifier}
+                      onChange={(e) => setUnitIdentifier(e.target.value)}
+                      placeholder="Ej: Piso 4 Depto B"
+                      className="min-h-[48px] w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <span className="block text-xs font-extrabold">
+                      Zona o corredor *
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {PROPERTY_CORRIDORS.map((c) => {
+                        const selected = corridor === c;
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setCorridor(c)}
+                            aria-pressed={selected}
+                            className={`rounded-2xl border-2 px-3.5 py-2.5 text-left text-xs font-extrabold transition-colors cursor-pointer ${
+                              selected
+                                ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] text-[var(--brand-primary)]"
+                                : "border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
+                            }`}
+                          >
+                            {CORRIDOR_LABELS[c]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* PASO 1: PRESENTACIÓN Y CAPACIDAD */}
+              {wizardStep === 1 && (
+                <div className="space-y-4">
+                  <div>
+                    <label
+                      htmlFor="prop-title"
+                      className="block text-xs font-extrabold mb-1.5"
+                    >
+                      Título de tu alojamiento *
+                    </label>
+                    <input
+                      id="prop-title"
+                      name="title"
+                      type="text"
+                      required
+                      minLength={5}
+                      maxLength={140}
+                      value={title}
+                      onChange={(e) => handleTitleChange(e.target.value)}
+                      placeholder="Ej: Studio Luminoso Palermo Soho"
+                      className="min-h-[50px] w-full rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSlugEditor((p) => !p)}
+                      className="text-xs font-bold text-[var(--brand-primary)] underline cursor-pointer"
+                    >
+                      {showSlugEditor
+                        ? "Ocultar enlace personalizado"
+                        : `Enlace directo: /p/${slug || "tu-anuncio"} (personalizar)`}
+                    </button>
+                    {showSlugEditor && (
+                      <div className="mt-2">
+                        <input
+                          id="prop-slug"
+                          name="slug"
+                          type="text"
+                          required
+                          minLength={3}
+                          maxLength={120}
+                          value={slug}
+                          onChange={(e) => {
+                            setSlugManuallyEdited(true);
+                            setSlug(slugifyPropertyTitle(e.target.value));
+                          }}
+                          placeholder="studio-luminoso-palermo-soho"
+                          className="min-h-[44px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-xs font-mono"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="prop-description"
+                      className="block text-xs font-extrabold mb-1.5"
+                    >
+                      Contanos qué tiene y cómo es la convivencia (mín. 20 letras) *
+                    </label>
+                    <textarea
+                      id="prop-description"
+                      name="description"
+                      required
+                      minLength={20}
+                      rows={3}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Departamento equipado para estadías cortas y largas (1 a 6 meses). Edificio tranquilo y Wi-Fi de alta velocidad."
+                      className="w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5 text-sm"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2">
+                      <span className="text-xs font-extrabold">
+                        Adultos máx.
+                      </span>
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setMaxAdults((n) => Math.max(1, n - 1))}
+                          aria-label="Restar un adulto"
+                          className="h-8 w-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] inline-flex items-center justify-center font-extrabold cursor-pointer"
+                        >
+                          <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                        <span className="w-6 text-center text-sm font-black">
+                          {maxAdults}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMaxAdults((n) => Math.min(20, n + 1))
+                          }
+                          aria-label="Sumar un adulto"
+                          className="h-8 w-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-primary)] inline-flex items-center justify-center font-extrabold cursor-pointer"
+                        >
+                          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2">
+                      <label htmlFor="prop-wifi" className="text-xs font-extrabold">
+                        Wi-Fi (Mbps)
+                      </label>
+                      <input
+                        id="prop-wifi"
+                        name="wifiSpeedMbps"
+                        type="number"
+                        min={1}
+                        max={10000}
+                        value={wifiSpeedMbps}
+                        onChange={(e) => setWifiSpeedMbps(Number(e.target.value))}
+                        className="w-24 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-sm font-bold text-right"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* PASO 2: TARIFA, MONEDA Y DESCUENTO MENSUAL */}
+              {wizardStep === 2 && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <span className="block text-xs font-extrabold">
+                      Moneda base de publicación
+                    </span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {PROPERTY_CURRENCIES.map((curr) => (
+                        <button
+                          key={curr}
+                          type="button"
+                          onClick={() => setBaseCurrency(curr)}
+                          aria-pressed={baseCurrency === curr}
+                          className={`min-h-[44px] rounded-2xl border-2 text-xs font-extrabold cursor-pointer transition-colors ${
+                            baseCurrency === curr
+                              ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] text-[var(--brand-primary)]"
+                              : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
+                          }`}
+                        >
+                          {curr}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label
+                        htmlFor="prop-rate"
+                        className="block text-xs font-extrabold mb-1"
+                      >
+                        Tarifa por noche ({baseCurrency}) *
+                      </label>
+                      <input
+                        id="prop-rate"
+                        name="nightlyRate"
+                        type="number"
+                        min={1}
+                        step="0.01"
+                        required
+                        value={nightlyRate}
+                        onChange={(e) => setNightlyRate(Number(e.target.value))}
+                        className="min-h-[52px] w-full rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-lg font-black"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="prop-discount"
+                        className="block text-xs font-extrabold mb-1"
+                      >
+                        Descuento estadía larga (15–50%) *
+                      </label>
+                      <input
+                        id="prop-discount"
+                        name="monthlyDiscountPct"
+                        type="number"
+                        min={15}
+                        max={50}
+                        required
+                        value={monthlyDiscountPct}
+                        onChange={(e) =>
+                          setMonthlyDiscountPct(Number(e.target.value))
+                        }
+                        className="min-h-[52px] w-full rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-lg font-black"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="flex items-center gap-2.5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 text-xs font-bold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={absorbInstallmentsCost}
+                        onChange={(e) =>
+                          setAbsorbInstallmentsCost(e.target.checked)
+                        }
+                        className="h-4 w-4 accent-[var(--brand-primary)]"
+                      />
+                      <span>Ofrecer 3 y 6 cuotas en Pesos</span>
+                    </label>
+
+                    <label className="flex items-center gap-2.5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 text-xs font-bold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={acceptsUsdt}
+                        onChange={(e) => setAcceptsUsdt(e.target.checked)}
+                        className="h-4 w-4 accent-[var(--brand-primary)]"
+                      />
+                      <span>Aceptar USDT (Polygon)</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* PASO 3: ESTADÍAS LARGAS (1 A 6 MESES) */}
+              {wizardStep === 3 && (
+                <MidTermPolicyEditor
+                  value={midTermPolicy}
+                  onChange={setMidTermPolicy}
+                />
+              )}
+
+              {/* PASO 4: FOTOGRAFÍAS DEL ESPACIO */}
+              {wizardStep === 4 && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextPreset =
+                          CURATED_OPTIMIZED_PHOTOS[
+                            images.length % CURATED_OPTIMIZED_PHOTOS.length
+                          ] ?? DEFAULT_COVER_PHOTO;
+                        if (images.length < 10) {
+                          setImages((prev) => [...prev, nextPreset]);
+                        }
+                      }}
+                      className="btn-secondary-3d inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold"
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Agregar foto de muestra</span>
+                    </button>
+
+                    <label
+                      htmlFor="photo-file-input"
+                      className="inline-flex items-center gap-2 rounded-xl border-2 border-dashed border-[var(--brand-primary)] bg-[var(--bg-primary)] px-4 py-2 text-xs font-extrabold text-[var(--brand-primary)] hover:bg-[var(--bg-secondary)] cursor-pointer"
+                    >
+                      <Upload className="h-4 w-4" aria-hidden="true" />
+                      <span>
+                        {uploadingPhoto ? "Subiendo..." : "Subir foto propia"}
+                      </span>
+                    </label>
+                    <input
+                      id="photo-file-input"
+                      type="file"
+                      accept="image/webp,image/avif,image/jpeg,image/png"
+                      onChange={handleFileUpload}
+                      disabled={uploadingPhoto}
+                      className="sr-only"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="photo-alt"
+                      className="block text-xs font-bold mb-1"
+                    >
+                      Descripción breve de la foto (opcional)
+                    </label>
+                    <input
+                      id="photo-alt"
+                      type="text"
+                      value={photoAltInput}
+                      onChange={(e) => setPhotoAltInput(e.target.value)}
+                      placeholder="Ej: Living luminoso con balcón en Palermo"
+                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-xs"
+                    />
+                  </div>
+
+                  {photoFeedback.type !== "idle" && (
+                    <p
+                      role={photoFeedback.type === "error" ? "alert" : "status"}
+                      className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                        photoFeedback.type === "error"
+                          ? "bg-red-100 text-red-900"
+                          : "badge-consorcio-friendly"
+                      }`}
+                    >
+                      {photoFeedback.message}
+                    </p>
+                  )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {images.map((img, idx) => (
+                      <div
+                        key={`${img.url}-${idx}`}
+                        className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]"
+                      >
+                        <Image
+                          src={img.url}
+                          alt={img.alt}
+                          width={img.width}
+                          height={img.height}
+                          unoptimized={img.url.startsWith("data:")}
+                          className="h-full w-full object-cover"
+                        />
+                        {images.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setImages((prev) =>
+                                prev.filter((_, i) => i !== idx)
+                              )
+                            }
+                            aria-label={`Eliminar fotografía ${idx + 1}`}
+                            className="absolute top-2 right-2 rounded-full bg-black/75 p-1.5 text-white hover:bg-red-700 cursor-pointer"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* PASO 5: CLAVE RESGUARDADA Y PUBLICACIÓN */}
+              {wizardStep === 5 && (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border-2 border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/40 p-4 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label
+                        htmlFor="prop-pin"
+                        className="flex items-center gap-2 text-sm font-extrabold"
+                      >
+                        <Lock
+                          className="h-4 w-4 text-emerald-700 dark:text-emerald-400"
+                          aria-hidden="true"
+                        />
+                        Clave o instrucciones de entrada{" "}
+                        {editingId ? "(Opcional al editar)" : "*"}
+                      </label>
+                      <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                        Resguardada y encriptada
+                      </span>
+                    </div>
+                    <input
+                      id="prop-pin"
+                      name="accessCodePlain"
+                      type="password"
+                      required={!editingId}
+                      minLength={4}
+                      maxLength={240}
+                      value={accessCodePlain}
+                      onChange={(e) => setAccessCodePlain(e.target.value)}
+                      placeholder={
+                        editingId
+                          ? "Dejá en blanco para conservar la clave actual o escribí una nueva..."
+                          : "Ej: PIN Cerradura #8492* — Llave en portería"
+                      }
+                      className="min-h-[48px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-sm font-mono"
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-1.5 text-xs">
+                    <p className="font-extrabold text-[var(--text-primary)]">
+                      Resumen rápido de tu publicación:
+                    </p>
+                    <p>
+                      <strong>{title}</strong> · {addressLine} ({unitIdentifier})
+                    </p>
+                    <p className="text-[var(--text-secondary)]">
+                      Tarifa: <strong>{nightlyRate} {baseCurrency}/noche</strong>{" "}
+                      (-{monthlyDiscountPct}% mensual) · Estadías 1–6 meses:{" "}
+                      <strong>
+                        {midTermPolicy.approvalMode === "HOST_APPROVAL_INTERVIEW"
+                          ? "Con entrevista previa"
+                          : "Confirmación automática"}
+                      </strong>{" "}
+                      ({enabledReqCount} requisitos)
+                    </p>
+                  </div>
+
+                  {formStatus.type === "error" && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-xl bg-red-100 text-red-900 px-4 py-3 text-xs font-bold"
+                    >
+                      <AlertCircle
+                        className="h-4 w-4 shrink-0 mt-0.5"
+                        aria-hidden="true"
+                      />
+                      <span>{formStatus.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </ProgressiveFlowShell>
+          </form>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {initialHostEarnings && (
+            <HostEarningsPanel
+              earnings={initialHostEarnings}
+              payoutSplitArsPct={payoutSplitArsPct}
+              variant="dashboard"
+            />
+          )}
+
+          <HostBookingConfirmationsPanel
+            initialItems={initialBookingConfirmations}
+          />
+
+          <HostMidTermApplicationsPanel
+            initialApplications={initialMidTermApplications}
+          />
+
+          <section
+            aria-labelledby="list-properties-heading"
+            className="space-y-4"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-extrabold">
-                  Fotografías Optimizadas de la Unidad (<code>CLS = 0</code> · Máx. 5 MB)
-                </h3>
+                <h2
+                  id="list-properties-heading"
+                  className="text-xl font-extrabold"
+                >
+                  Tus propiedades activas ({displayedProperties.length})
+                </h2>
                 <p className="text-xs text-[var(--text-secondary)]">
-                  Formatos aceptados: <code>WebP</code>, <code>AVIF</code>, <code>JPEG</code>, <code>PNG</code>. Dimensionamiento fijo <code>1200x900</code> (4:3).
+                  Tu clave de entrada siempre permanece protegida y privada.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  const nextPreset =
-                    CURATED_OPTIMIZED_PHOTOS[
-                      images.length % CURATED_OPTIMIZED_PHOTOS.length
-                    ] ?? DEFAULT_COVER_PHOTO;
-                  if (images.length < 10) {
-                    setImages((prev) => [...prev, nextPreset]);
-                  }
+                  resetForm();
+                  setWizardStep(0);
+                  setActiveView("wizard");
                 }}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-bold hover:bg-[var(--bg-elevated)] cursor-pointer"
+                className="btn-primary-3d inline-flex min-h-[42px] items-center gap-1.5 rounded-xl px-4 text-xs font-extrabold"
               >
-                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                Agregar Foto Curada (1200x900 WebP)
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                <span>Publicar nueva propiedad</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-              <div>
-                <label htmlFor="photo-alt" className="block text-xs font-bold mb-1">
-                  Texto Alternativo (Accesibilidad WCAG AAA)
-                </label>
-                <input
-                  id="photo-alt"
-                  type="text"
-                  value={photoAltInput}
-                  onChange={(e) => setPhotoAltInput(e.target.value)}
-                  placeholder="Ej: Balcón terraza con vista abierta en Palermo"
-                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-xs"
-                />
+            {displayedProperties.length === 0 ? (
+              <div className="surface-card p-8 text-center space-y-3">
+                <Building2 className="h-8 w-8 mx-auto text-[var(--text-secondary)]" />
+                <p className="text-sm font-bold">
+                  Todavía no publicaste propiedades
+                </p>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Usá el asistente paso a paso para publicar tu primer
+                  departamento.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetForm();
+                    setWizardStep(0);
+                    setActiveView("wizard");
+                  }}
+                  className="btn-primary-3d inline-flex min-h-[44px] items-center gap-1.5 rounded-xl px-5 text-xs font-extrabold"
+                >
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  <span>Crear mi primera publicación</span>
+                </button>
               </div>
-              <div>
-                <label
-                  htmlFor="photo-file-input"
-                  className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--brand-primary)] bg-[var(--bg-primary)] px-4 py-2 text-xs font-bold text-[var(--brand-primary)] hover:bg-[var(--bg-elevated)] cursor-pointer"
-                >
-                  <Upload className="h-4 w-4" aria-hidden="true" />
-                  {uploadingPhoto
-                    ? "Optimizando a WebP 1200x900..."
-                    : "Subir y Optimizar Imagen (WebP/AVIF/JPG/PNG <= 5MB)"}
-                </label>
-                <input
-                  id="photo-file-input"
-                  type="file"
-                  accept="image/webp,image/avif,image/jpeg,image/png"
-                  onChange={handleFileUpload}
-                  disabled={uploadingPhoto}
-                  className="sr-only"
-                />
-              </div>
-            </div>
-
-            {photoFeedback.type !== "idle" && (
-              <p
-                role={photoFeedback.type === "error" ? "alert" : "status"}
-                className={`rounded-xl px-3 py-2 text-xs font-bold ${
-                  photoFeedback.type === "error"
-                    ? "bg-red-100 text-red-900"
-                    : "badge-consorcio-friendly"
-                }`}
-              >
-                {photoFeedback.message}
-              </p>
-            )}
-
-            {/* Galería de previsualización con dimensiones explícitas (CLS = 0) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {images.map((img, idx) => (
-                <div
-                  key={`${img.url}-${idx}`}
-                  className="group relative aspect-[4/3] w-full overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]"
-                >
-                  <Image
-                    src={img.url}
-                    alt={img.alt}
-                    width={img.width}
-                    height={img.height}
-                    unoptimized={img.url.startsWith("data:")}
-                    className="h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1 text-[10px] text-white flex items-center justify-between">
-                    <span className="truncate">
-                      {img.width}x{img.height} · {img.mimeType.replace("image/", "").toUpperCase()}
-                    </span>
-                    {images.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setImages((prev) => prev.filter((_, i) => i !== idx))
-                        }
-                        aria-label={`Eliminar fotografía ${idx + 1}`}
-                        className="text-red-300 hover:text-red-100 ml-1 cursor-pointer"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {formStatus.type === "error" && (
-            <div
-              role="alert"
-              className="flex items-start gap-2 rounded-xl bg-red-100 text-red-900 px-4 py-3 text-xs font-bold"
-            >
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{formStatus.message}</span>
-            </div>
-          )}
-
-          {formStatus.type === "success" && (
-            <div
-              role="status"
-              className="flex items-start gap-2 badge-consorcio-friendly rounded-xl px-4 py-3 text-xs font-bold"
-            >
-              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
-              <span>{formStatus.message}</span>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={formStatus.type === "loading"}
-            className="w-full rounded-xl bg-[var(--brand-primary)] px-5 py-3.5 text-sm font-extrabold text-white hover:bg-[var(--brand-primary-hover)] disabled:opacity-50 cursor-pointer"
-          >
-            {formStatus.type === "loading"
-              ? "Cifrando PIN con AES-256-GCM y guardando en Supabase Cloud..."
-              : editingId
-              ? "Guardar Cambios en Unidad Funcional"
-              : "Publicar Unidad Funcional con PIN Cifrado AES-256-GCM"}
-          </button>
-        </form>
-      </section>
-
-      {/* Columna Derecha: Listado de Unidades Funcionales con CLS = 0 y Exclusión del PIN */}
-      <section
-        aria-labelledby="list-properties-heading"
-        className="lg:col-span-5 space-y-4"
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 id="list-properties-heading" className="text-xl font-extrabold">
-              Unidades Funcionales Activas ({displayedProperties.length})
-            </h2>
-            <p className="text-xs text-[var(--text-secondary)]">
-              Consultadas con <code>PUBLIC_PROPERTY_COLUMNS</code> (sin exponer{" "}
-              <code>access_code_*</code>).
-            </p>
-          </div>
-        </div>
-
-        {displayedProperties.length === 0 ? (
-          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6 text-center space-y-2">
-            <Building2 className="h-8 w-8 mx-auto text-[var(--text-secondary)]" />
-            <p className="text-sm font-bold">
-              Aún no hay Unidades Funcionales registradas
-            </p>
-            <p className="text-xs text-[var(--text-secondary)]">
-              Completá el formulario a la izquierda para dar de alta tu primera propiedad con código de cerradura cifrado en <code>AES-256-GCM</code>.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {displayedProperties.map((prop) => {
-              const cover = prop.images[0] ?? CURATED_OPTIMIZED_PHOTOS[0];
-              return (
-                <article
-                  key={prop.id}
-                  className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-xs transition-shadow hover:shadow-md"
-                >
-                  {/* Contenedor de relación de aspecto 4:3 fija para garantizar CLS = 0 */}
-                  <div className="relative aspect-[4/3] w-full bg-[var(--bg-secondary)]">
-                    <Image
-                      src={cover.url}
-                      alt={cover.alt}
-                      width={cover.width}
-                      height={cover.height}
-                      unoptimized={cover.url.startsWith("data:")}
-                      className="h-full w-full object-cover"
-                    />
-                    <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
-                      <span className="badge-consorcio-friendly inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-xs">
-                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                        {prop.consortium_config?.active
-                          ? `Consorcio Friendly · ${Number(
-                              prop.consortium_config.micro_canon_pct
-                            ).toFixed(2)}% Canon`
-                          : "PIN Cifrado AES-256-GCM"}
-                      </span>
-                      <span className="rounded-full bg-black/75 text-white px-2.5 py-1 text-[11px] font-bold">
-                        {prop.corridor}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="p-5 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-base font-extrabold leading-snug">
-                          {prop.title}
-                        </h3>
-                        <p className="text-xs text-[var(--text-secondary)]">
-                          {prop.address_line} ·{" "}
-                          <span className="font-semibold">{prop.unit_identifier}</span>
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-base font-extrabold">
-                          {prop.base_currency} {prop.nightly_rate.toLocaleString("es-AR")}
-                          <span className="text-xs font-normal text-[var(--text-secondary)]">
-                            {" "}
-                            / noche
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {displayedProperties.map((prop) => {
+                  const cover = prop.images[0] ?? CURATED_OPTIMIZED_PHOTOS[0];
+                  const policy = normalizeMidTermPolicy(prop.mid_term_policy);
+                  const activeReqCount = policy.requirements.filter(
+                    (r) => r.enabled
+                  ).length;
+                  return (
+                    <article
+                      key={prop.id}
+                      className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-xs transition-shadow hover:shadow-md"
+                    >
+                      <div className="relative aspect-[4/3] w-full bg-[var(--bg-secondary)]">
+                        <Image
+                          src={cover.url}
+                          alt={cover.alt}
+                          width={cover.width}
+                          height={cover.height}
+                          unoptimized={cover.url.startsWith("data:")}
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+                          <span className="badge-consorcio-friendly inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-xs">
+                            <ShieldCheck
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                            {prop.consortium_config?.active
+                              ? `Edificio amigable · ${Number(
+                                  prop.consortium_config.micro_canon_pct
+                                ).toFixed(2)}%`
+                              : "Clave resguardada"}
                           </span>
-                        </p>
-                        <span className="inline-block rounded-full bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] px-2 py-0.5 text-[10px] font-bold">
-                          Media Estadía: -{prop.monthly_discount_pct}% mensual
-                        </span>
+                          <span className="rounded-full bg-black/75 text-white px-2.5 py-1 text-[11px] font-bold">
+                            {prop.corridor}
+                          </span>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-secondary)] border-t border-[var(--border-subtle)] pt-3">
-                      <span className="inline-flex items-center gap-1 font-semibold">
-                        <Users className="h-3.5 w-3.5" aria-hidden="true" />
-                        Hasta {prop.max_adults} adultos
-                      </span>
-                      {prop.wifi_speed_mbps && (
-                        <span className="inline-flex items-center gap-1 font-semibold">
-                          <Wifi className="h-3.5 w-3.5" aria-hidden="true" />
-                          {prop.wifi_speed_mbps} Mbps
-                        </span>
-                      )}
-                      {prop.accepts_usdt && (
-                        <span className="rounded-full bg-[var(--badge-usdt-bg)] text-[var(--badge-usdt-text)] px-2 py-0.5 text-[10px] font-bold">
-                          USDT Polygon
-                        </span>
-                      )}
-                    </div>
+                      <div className="p-5 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-base font-extrabold leading-snug">
+                              {prop.title}
+                            </h3>
+                            <p className="text-xs text-[var(--text-secondary)]">
+                              {prop.address_line} ·{" "}
+                              <span className="font-semibold">
+                                {prop.unit_identifier}
+                              </span>
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-base font-extrabold">
+                              {prop.base_currency}{" "}
+                              {prop.nightly_rate.toLocaleString("es-AR")}
+                              <span className="text-xs font-normal text-[var(--text-secondary)]">
+                                {" "}
+                                / noche
+                              </span>
+                            </p>
+                            <span className="inline-block rounded-full bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] px-2 py-0.5 text-[10px] font-bold">
+                              Media Estadía: -{prop.monthly_discount_pct}% mensual
+                            </span>
+                          </div>
+                        </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      <a
-                        href={`/p/${prop.slug}`}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand-primary)] hover:underline"
-                      >
-                        <span>/p/{prop.slug}</span>
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                      </a>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-secondary)] border-t border-[var(--border-subtle)] pt-3">
+                          <span className="inline-flex items-center gap-1 font-semibold">
+                            <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                            Hasta {prop.max_adults} adultos
+                          </span>
+                          {prop.wifi_speed_mbps && (
+                            <span className="inline-flex items-center gap-1 font-semibold">
+                              <Wifi
+                                className="h-3.5 w-3.5"
+                                aria-hidden="true"
+                              />
+                              {prop.wifi_speed_mbps} Mbps
+                            </span>
+                          )}
+                          {prop.accepts_usdt && (
+                            <span className="rounded-full bg-[var(--badge-usdt-bg)] text-[var(--badge-usdt-text)] px-2 py-0.5 text-[10px] font-bold">
+                              USDT Polygon
+                            </span>
+                          )}
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                              policy.approvalMode === "HOST_APPROVAL_INTERVIEW"
+                                ? "bg-amber-500/15 text-amber-900 dark:text-amber-300 border border-amber-500/40"
+                                : "badge-consorcio-friendly"
+                            }`}
+                          >
+                            {policy.approvalMode === "HOST_APPROVAL_INTERVIEW"
+                              ? `Estadía larga: Entrevista previa · ${activeReqCount} req.`
+                              : `Estadía larga: Automática · ${activeReqCount} req.`}
+                          </span>
+                        </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleEditSelect(prop)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-bold hover:bg-[var(--bg-secondary)] cursor-pointer"
-                      >
-                        <Pencil className="h-3 w-3" aria-hidden="true" />
-                        Editar
-                      </button>
-                    </div>
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <a
+                            href={`/p/${prop.slug}`}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand-primary)] hover:underline"
+                          >
+                            <span>/p/{prop.slug}</span>
+                            <ExternalLink
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
+                          </a>
 
-                    <ConsortiumConfigPanel
-                      propertyId={prop.id}
-                      propertySlug={prop.slug}
-                      propertyTitle={prop.title}
-                      addressLine={prop.address_line}
-                      baseCurrency={prop.base_currency}
-                      nightlyRate={prop.nightly_rate}
-                      monthlyDiscountPct={prop.monthly_discount_pct}
-                      absorbInstallmentsCost={prop.absorb_installments_cost}
-                      initialHostConfig={consortiumConfigs[prop.id] ?? null}
-                      publicConsortiumConfig={prop.consortium_config ?? null}
-                      onSaved={(savedConfig) => {
-                        setConsortiumConfigs((prev) => ({
-                          ...prev,
-                          [prop.id]: savedConfig,
-                        }));
-                        const updatedPublicConfig = savedConfig.active
-                          ? {
-                              id: savedConfig.id,
-                              property_id: savedConfig.property_id,
-                              consortium_name: savedConfig.consortium_name,
-                              micro_canon_pct: savedConfig.micro_canon_pct,
-                              active: savedConfig.active,
+                          <button
+                            type="button"
+                            onClick={() => handleEditSelect(prop)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1 text-xs font-bold hover:bg-[var(--bg-secondary)] cursor-pointer"
+                          >
+                            <Pencil className="h-3 w-3" aria-hidden="true" />
+                            Editar
+                          </button>
+                        </div>
+
+                        <ConsortiumConfigPanel
+                          propertyId={prop.id}
+                          propertySlug={prop.slug}
+                          propertyTitle={prop.title}
+                          addressLine={prop.address_line}
+                          baseCurrency={prop.base_currency}
+                          nightlyRate={prop.nightly_rate}
+                          monthlyDiscountPct={prop.monthly_discount_pct}
+                          absorbInstallmentsCost={prop.absorb_installments_cost}
+                          initialHostConfig={consortiumConfigs[prop.id] ?? null}
+                          publicConsortiumConfig={prop.consortium_config ?? null}
+                          onSaved={(savedConfig) => {
+                            setConsortiumConfigs((prev) => ({
+                              ...prev,
+                              [prop.id]: savedConfig,
+                            }));
+                            const updatedPublicConfig = savedConfig.active
+                              ? {
+                                  id: savedConfig.id,
+                                  property_id: savedConfig.property_id,
+                                  consortium_name: savedConfig.consortium_name,
+                                  micro_canon_pct: savedConfig.micro_canon_pct,
+                                  active: savedConfig.active,
+                                }
+                              : null;
+                            setHostProperties((prev) =>
+                              prev.map((p) =>
+                                p.id === prop.id
+                                  ? { ...p, consortium_config: updatedPublicConfig }
+                                  : p
+                              )
+                            );
+                            setPublicProperties((prev) =>
+                              prev.map((p) =>
+                                p.id === prop.id
+                                  ? { ...p, consortium_config: updatedPublicConfig }
+                                  : p
+                              )
+                            );
+                          }}
+                        />
+
+                        <PropertyIcalSyncPanel
+                          propertyId={prop.id}
+                          propertyTitle={prop.title}
+                        />
+
+                        <div className="border-t border-[var(--border-subtle)] pt-3 space-y-3">
+                          <button
+                            type="button"
+                            aria-expanded={Boolean(
+                              expandedCalendarPropIds[prop.id]
+                            )}
+                            onClick={() =>
+                              setExpandedCalendarPropIds((prev) => ({
+                                ...prev,
+                                [prop.id]: !prev[prop.id],
+                              }))
                             }
-                          : null;
-                        setHostProperties((prev) =>
-                          prev.map((p) =>
-                            p.id === prop.id
-                              ? { ...p, consortium_config: updatedPublicConfig }
-                              : p
-                          )
-                        );
-                        setPublicProperties((prev) =>
-                          prev.map((p) =>
-                            p.id === prop.id
-                              ? { ...p, consortium_config: updatedPublicConfig }
-                              : p
-                          )
-                        );
-                      }}
-                    />
+                            className="btn-secondary-3d inline-flex w-full min-h-[40px] items-center justify-between gap-2 rounded-xl px-3.5 text-xs font-extrabold"
+                          >
+                            <span className="inline-flex items-center gap-1.5">
+                              <Calendar
+                                className="h-3.5 w-3.5 text-[var(--brand-primary)]"
+                                aria-hidden="true"
+                              />
+                              <span>
+                                {expandedCalendarPropIds[prop.id]
+                                  ? "Ocultar calendario visual de disponibilidad"
+                                  : "Calendario visual de disponibilidad"}
+                              </span>
+                            </span>
+                            <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px]">
+                              {(occupiedRangesByProperty[prop.id] ?? []).length}{" "}
+                              {(occupiedRangesByProperty[prop.id] ?? [])
+                                .length === 1
+                                ? "reserva/bloqueo"
+                                : "reservas/bloqueos"}
+                            </span>
+                          </button>
 
-                    <PropertyIcalSyncPanel
-                      propertyId={prop.id}
-                      propertyTitle={prop.title}
-                    />
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+                          {expandedCalendarPropIds[prop.id] && (
+                            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/65 p-3">
+                              <PropertyAvailabilityCalendar
+                                occupiedRanges={
+                                  occupiedRangesByProperty[prop.id] ?? []
+                                }
+                                todayYmd={todayYmd}
+                                variant="compact"
+                                readOnly
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }

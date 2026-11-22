@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MidTermGuestApplicationSchema } from "@/modules/properties/mid-term-policy";
 
 export const BOOKING_PAYMENT_CURRENCIES = ["ARS", "USDT"] as const;
 export type BookingPaymentCurrency = (typeof BOOKING_PAYMENT_CURRENCIES)[number];
@@ -66,6 +67,8 @@ export const CreateBookingRequestSchema = z
       .max(20, "La patente del vehículo no puede superar los 20 caracteres")
       .optional()
       .nullable(),
+    midTermApplication: MidTermGuestApplicationSchema.optional().nullable(),
+    acknowledgedMidTermRequirements: z.boolean().optional(),
     guestId: z.string().uuid().optional(),
   })
   .superRefine((data, ctx) => {

@@ -789,10 +789,11 @@ export async function getBookingCheckinStateAction(
     );
 
     const cleanToken = inviteToken?.trim() || null;
+    const matchedSlot = cleanToken
+      ? slots.find((s) => s.inviteToken === cleanToken)
+      : undefined;
     const activeSlot =
-      (cleanToken
-        ? slots.find((s) => s.inviteToken === cleanToken)
-        : slots.find((s) => s.status !== "VERIFIED") ?? slots[0]) ?? null;
+      matchedSlot ?? slots.find((s) => s.status !== "VERIFIED") ?? slots[0] ?? null;
 
     const declaredAdultsCount = Number(bRow.declared_adults_count);
     const verifiedAdultsCount = Number(bRow.verified_adults_count);

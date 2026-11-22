@@ -20,7 +20,7 @@ export default async function VerifyPorteriaPassPage({ params }: VerifyPageProps
 
   if (!res.ok) {
     return (
-      <main className="mx-auto max-w-xl px-4 py-10">
+      <div className="mx-auto max-w-xl px-4 py-10">
         <section
           role="alert"
           aria-live="assertive"
@@ -33,14 +33,14 @@ export default async function VerifyPorteriaPassPage({ params }: VerifyPageProps
             No permita el acceso. Contacte a la administración del consorcio.
           </p>
         </section>
-      </main>
+      </div>
     );
   }
 
   const pass = res.data;
 
   return (
-    <main className="mx-auto max-w-xl px-4 py-10">
+    <div className="mx-auto max-w-xl px-4 py-10">
       <section
         aria-labelledby="pass-title"
         className="rounded-3xl border-4 border-emerald-900 bg-emerald-50 p-6 text-emerald-950 space-y-5"
@@ -100,6 +100,6 @@ export default async function VerifyPorteriaPassPage({ params }: VerifyPageProps
           </ul>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

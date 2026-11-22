@@ -21,14 +21,18 @@ import {
   createPaymentsPgClient,
   settleApprovedUsdtPayment,
 } from "./settlement";
+import { isBookingHoldExpired } from "@/lib/bookings/partial-hold";
 
 export interface ArsCheckoutSummary {
   bookingId: string;
+  propertySlug: string;
   propertyTitle: string;
   checkIn: string;
   checkOut: string;
   nightsCount: number;
   status: string;
+  holdExpiresAt: string | null;
+  hostConfirmedAt: string | null;
   paymentCurrency: string;
   amountArs: string;
   payable: boolean;
@@ -37,12 +41,15 @@ export interface ArsCheckoutSummary {
 
 export interface UsdtCheckoutSummary {
   bookingId: string;
+  propertySlug: string;
   propertyTitle: string;
   checkIn: string;
   checkOut: string;
   nightsCount: number;
   isMidTerm: boolean;
   status: string;
+  holdExpiresAt: string | null;
+  hostConfirmedAt: string | null;
   paymentCurrency: string;
   amountUsdt: string;
   escrowDepositUsdt: string;
@@ -84,6 +91,8 @@ interface CheckoutBookingRow {
   id: string;
   guest_id: string | null;
   status: string;
+  hold_expires_at: Date | string | null;
+  host_confirmed_at: Date | string | null;
   payment_currency: string;
   total_amount: string;
   escrow_deposit_usdt: string;
@@ -91,8 +100,14 @@ interface CheckoutBookingRow {
   check_in: string;
   check_out: string;
   nights_count: number;
+  property_slug: string;
   title: string;
   token_match: boolean;
+}
+
+function toIsoOrNull(val: Date | string | null | undefined): string | null {
+  if (!val) return null;
+  return val instanceof Date ? val.toISOString() : new Date(val).toISOString();
 }
 
 /** Solo el huésped titular autenticado o quien posea un `invite_token` de ESA reserva puede consultarla o cobrarla. */
@@ -109,12 +124,13 @@ async function loadAuthorizedBooking(
 
   const res = await pg.query<CheckoutBookingRow>(
     `SELECT b.id, b.guest_id, b.status::text AS status,
+            b.hold_expires_at, b.host_confirmed_at,
             b.payment_currency::text AS payment_currency,
             b.total_amount::text AS total_amount,
             b.escrow_deposit_usdt::text AS escrow_deposit_usdt,
             b.is_mid_term,
             b.check_in::text AS check_in, b.check_out::text AS check_out,
-            b.nights_count, p.title,
+            b.nights_count, p.slug AS property_slug, p.title,
             ($2::uuid IS NOT NULL AND EXISTS (
                SELECT 1 FROM public.guest_verifications gv
                WHERE gv.booking_id = b.id AND gv.invite_token = $2::uuid
@@ -138,6 +154,20 @@ async function loadAuthorizedBooking(
       message: "No estás autorizado para pagar o consultar esta reserva.",
     };
   }
+
+  if (
+    row.status === "PENDING_PAYMENT" &&
+    isBookingHoldExpired(row.status, row.hold_expires_at)
+  ) {
+    await pg.query(
+      `UPDATE public.bookings
+       SET status = 'EXPIRED', updated_at = NOW()
+       WHERE id = $1 AND status = 'PENDING_PAYMENT'`,
+      [row.id]
+    );
+    row.status = "EXPIRED";
+  }
+
   return { ok: true, row };
 }
 
@@ -173,11 +203,14 @@ export async function getArsCheckoutSummaryAction(
       ok: true,
       data: {
         bookingId: r.id,
+        propertySlug: r.property_slug,
         propertyTitle: r.title,
         checkIn: r.check_in,
         checkOut: r.check_out,
         nightsCount: Number(r.nights_count),
         status: r.status,
+        holdExpiresAt: toIsoOrNull(r.hold_expires_at),
+        hostConfirmedAt: toIsoOrNull(r.host_confirmed_at),
         paymentCurrency: r.payment_currency,
         amountArs: normalizeArsAmount(r.total_amount).toFixed(2),
         payable: r.status === "PENDING_PAYMENT" && r.payment_currency === "ARS",
@@ -214,6 +247,16 @@ export async function createArsCheckoutPreferenceAction(
       return { ok: false, error: { code: auth.code, message: auth.message } };
     }
     const r = auth.row;
+    if (r.status === "EXPIRED") {
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "Tu reserva parcial de 1 hora venció y las fechas volvieron a quedar disponibles. Elegí tus fechas nuevamente en el calendario.",
+        },
+      };
+    }
     if (r.status !== "PENDING_PAYMENT") {
       return {
         ok: false,
@@ -278,12 +321,15 @@ export async function getUsdtCheckoutSummaryAction(
       ok: true,
       data: {
         bookingId: r.id,
+        propertySlug: r.property_slug,
         propertyTitle: r.title,
         checkIn: r.check_in,
         checkOut: r.check_out,
         nightsCount: Number(r.nights_count),
         isMidTerm: Boolean(r.is_mid_term),
         status: r.status,
+        holdExpiresAt: toIsoOrNull(r.hold_expires_at),
+        hostConfirmedAt: toIsoOrNull(r.host_confirmed_at),
         paymentCurrency: r.payment_currency,
         amountUsdt,
         escrowDepositUsdt,
@@ -340,6 +386,17 @@ export async function verifyAndSettleUsdtPaymentAction(
       return { ok: false, error: { code: auth.code, message: auth.message } };
     }
     const r = auth.row;
+
+    if (r.status === "EXPIRED") {
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "Tu reserva parcial de 1 hora venció y las fechas volvieron a quedar disponibles. Elegí tus fechas nuevamente en el calendario.",
+        },
+      };
+    }
 
     if (r.status !== "PENDING_PAYMENT") {
       return {

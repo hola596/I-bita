@@ -10,11 +10,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   generateMidTermContractPdf,
+  generateShortStayAgreementPdf,
   type ContractGenerationInput,
 } from "./pdf-generator";
 import {
+  AgreementKindSchema,
   StayPurposeSchema,
   CONTRACT_STORAGE_BUCKET,
+  type AgreementKind,
   type ContractRecord,
 } from "./types";
 
@@ -181,6 +184,20 @@ async function ensureContractsBucketExists(): Promise<void> {
   }
 }
 
+function resolveContractAgreementKind(
+  storagePath: string,
+  nightsCount: number,
+  isMidTerm: boolean
+): AgreementKind {
+  if (
+    storagePath.includes("acuerdo-estadia-corta") ||
+    (nightsCount < 30 && !isMidTerm)
+  ) {
+    return "SHORT_STAY_SIMPLE";
+  }
+  return "MID_TERM_ART1199";
+}
+
 function toErr(err: unknown): { ok: false; error: { code: AppError["code"]; message: string } } {
   const appErr =
     err instanceof AppError
@@ -190,7 +207,8 @@ function toErr(err: unknown): { ok: false; error: { code: AppError["code"]; mess
 }
 
 /**
- * Genera el binario PDF del Contrato Art. 1199 CCyC, calcula su hash SHA-256 inmutable,
+ * Genera el binario PDF del contrato (Art. 1199 CCyC para >= 30 noches o Acuerdo Simple
+ * para estadías cortas < 30 noches), calcula su hash SHA-256 inmutable,
  * lo sube a Supabase Storage y persiste la firma electrónica en `public.contracts`.
  */
 export async function generateAndSignContractAction(
@@ -199,6 +217,7 @@ export async function generateAndSignContractAction(
     stayPurpose?: string;
     role?: "GUEST" | "HOST";
     signerIp?: string | null;
+    agreementKind?: AgreementKind;
   } = {},
   inviteToken?: string | null
 ): Promise<ActionResult<ContractRecord>> {
@@ -211,17 +230,28 @@ export async function generateAndSignContractAction(
   }
 
   const stayPurpose = StayPurposeSchema.parse(options.stayPurpose || "TURISMO");
+  const requestedKind: AgreementKind = options.agreementKind
+    ? AgreementKindSchema.parse(options.agreementKind)
+    : "MID_TERM_ART1199";
   const pg = createContractsPgClient();
   await pg.connect();
 
   try {
     const auth = await loadAuthorizedContractBooking(pg, parsedId.data, inviteToken);
 
-    // AC-2: Rechazo categórico para reservas de estadía corta (< 30 noches)
-    if (auth.nightsCount < 30 && !auth.isMidTerm) {
+    // AC-2: El Contrato Temporario Art. 1199 aplica exclusivamente a >= 30 noches
+    if (requestedKind === "MID_TERM_ART1199" && auth.nightsCount < 30 && !auth.isMidTerm) {
       throw new AppError(
         "VALIDATION_ERROR",
         "Los contratos temporarios bajo Art. 1199 CCyC aplican exclusivamente a reservas de Media Estadía (>= 30 noches).",
+        422
+      );
+    }
+
+    if (requestedKind === "SHORT_STAY_SIMPLE" && (auth.nightsCount >= 30 || auth.isMidTerm)) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "Las estadías de 30 noches o más requieren la firma del Contrato Temporario Art. 1199 CCyC.",
         422
       );
     }
@@ -303,7 +333,10 @@ export async function generateAndSignContractAction(
     };
 
     // 1. Construir el binario PDF real con pdf-lib (Subtarea 4.3.2)
-    const pdfBytes = await generateMidTermContractPdf(pdfInput);
+    const pdfBytes =
+      requestedKind === "SHORT_STAY_SIMPLE"
+        ? await generateShortStayAgreementPdf(pdfInput)
+        : await generateMidTermContractPdf(pdfInput);
 
     // 2. Calcular el hash de sellado inmutable SHA-256 (64 hex chars) (Subtarea 4.3.3)
     const pdfBuffer = Buffer.from(pdfBytes);
@@ -321,7 +354,10 @@ export async function generateAndSignContractAction(
       // Continuar si storage.buckets es administrado externamente
     }
 
-    const storagePath = `contracts/${auth.bookingId}/contract-art1199.pdf`;
+    const storagePath =
+      requestedKind === "SHORT_STAY_SIMPLE"
+        ? `contracts/${auth.bookingId}/acuerdo-estadia-corta.pdf`
+        : `contracts/${auth.bookingId}/contract-art1199.pdf`;
     try {
       const admin = createSupabaseAdminClient();
       await admin.storage
@@ -386,6 +422,11 @@ export async function generateAndSignContractAction(
       data: {
         id: record.id,
         bookingId: record.booking_id,
+        agreementKind: resolveContractAgreementKind(
+          record.pdf_storage_path,
+          auth.nightsCount,
+          auth.isMidTerm
+        ),
         stayPurpose: record.stay_purpose,
         pdfStoragePath: record.pdf_storage_path,
         pdfSha256Hash: record.pdf_sha256_hash,
@@ -401,6 +442,29 @@ export async function generateAndSignContractAction(
   } finally {
     await pg.end();
   }
+}
+
+/**
+ * Firma un Acuerdo Simple de Estadía Corta (< 30 noches) y genera su PDF sellado con SHA-256.
+ */
+export async function generateAndSignShortStayAgreementAction(
+  bookingId: string,
+  options: {
+    stayPurpose?: string;
+    role?: "GUEST" | "HOST";
+    signerIp?: string | null;
+  } = {},
+  inviteToken?: string | null
+): Promise<ActionResult<ContractRecord>> {
+  return generateAndSignContractAction(
+    bookingId,
+    {
+      ...options,
+      stayPurpose: options.stayPurpose || "ESTADIA_CORTA",
+      agreementKind: "SHORT_STAY_SIMPLE",
+    },
+    inviteToken
+  );
 }
 
 /**
@@ -451,6 +515,11 @@ export async function getContractDetailsAction(
       data: {
         id: r.id,
         bookingId: r.booking_id,
+        agreementKind: resolveContractAgreementKind(
+          r.pdf_storage_path,
+          auth.nightsCount,
+          auth.isMidTerm
+        ),
         stayPurpose: r.stay_purpose,
         pdfStoragePath: r.pdf_storage_path,
         pdfSha256Hash: r.pdf_sha256_hash,
@@ -519,7 +588,11 @@ export async function getContractDownloadSignedUrlAction(
     }
 
     if (!signedUrl) {
-      signedUrl = `${env.NEXT_PUBLIC_APP_URL}/api/contracts/${auth.bookingId}/download?hash=${r.pdf_sha256_hash}`;
+      const cleanToken = inviteToken?.trim();
+      const tokenQuery = cleanToken
+        ? `&token=${encodeURIComponent(cleanToken)}`
+        : "";
+      signedUrl = `${env.NEXT_PUBLIC_APP_URL}/api/contracts/${auth.bookingId}/download?hash=${r.pdf_sha256_hash}${tokenQuery}`;
     }
 
     return {

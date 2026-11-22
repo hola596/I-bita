@@ -8,6 +8,12 @@ import {
   type PropertyImageItem,
   PropertyImageSchema,
 } from "./validators";
+import { normalizeMidTermPolicy, type MidTermPolicy } from "./mid-term-policy";
+import {
+  isBookingHoldExpired,
+  resolveOccupancyKind,
+  type CalendarOccupancyKind,
+} from "@/lib/bookings/partial-hold";
 
 async function getPublicSupabaseClient() {
   try {
@@ -33,7 +39,7 @@ async function getPublicSupabaseClient() {
  * cumpliendo con AC-1 / AC-2 (AD-5, NFR-4: Zero-Trust Consorcial).
  */
 export const PUBLIC_PROPERTY_COLUMNS =
-  "id, host_id, slug, title, description, corridor, address_line, unit_identifier, max_adults, base_currency, nightly_rate, monthly_discount_pct, absorb_installments_cost, accepts_usdt, wifi_speed_mbps, images, is_published, created_at, updated_at" as const;
+  "id, host_id, slug, title, description, corridor, address_line, unit_identifier, max_adults, base_currency, nightly_rate, monthly_discount_pct, absorb_installments_cost, accepts_usdt, wifi_speed_mbps, images, is_published, mid_term_policy, created_at, updated_at" as const;
 
 /**
  * Columnas públicas de `public.consortium_configs` para mostrar la insignia
@@ -83,6 +89,9 @@ export interface OccupiedDateRange {
   checkIn: string;
   checkOut: string;
   status: string;
+  holdExpiresAt?: string | null;
+  hostConfirmedAt?: string | null;
+  occupancyKind?: CalendarOccupancyKind;
 }
 
 export interface SafePropertyRecord {
@@ -103,6 +112,7 @@ export interface SafePropertyRecord {
   wifi_speed_mbps: number | null;
   images: PropertyImageItem[];
   is_published: boolean;
+  mid_term_policy: MidTermPolicy;
   created_at: string;
   updated_at: string;
   hasEncryptedAccessCode: true;
@@ -246,6 +256,7 @@ export function sanitizePublicPropertyRow(
         : null,
     images: normalizePropertyImages(clone.images, title),
     is_published: Boolean(clone.is_published ?? true),
+    mid_term_policy: normalizeMidTermPolicy(clone.mid_term_policy),
     created_at: String(clone.created_at ?? new Date().toISOString()),
     updated_at: String(clone.updated_at ?? new Date().toISOString()),
     hasEncryptedAccessCode: true,
@@ -308,9 +319,17 @@ export async function getPropertyOccupiedDateRanges(
 
   const supabase = await getPublicSupabaseClient();
 
+  try {
+    await supabase.rpc("expire_stale_booking_holds", {
+      p_property_id: cleanPropertyId,
+    });
+  } catch {
+    // Continuar con filtrado defensivo en memoria si el RPC aún no está disponible
+  }
+
   const { data, error } = await supabase
     .from("bookings")
-    .select("id, check_in, check_out, status")
+    .select("id, check_in, check_out, status, hold_expires_at, host_confirmed_at")
     .eq("property_id", cleanPropertyId)
     .not("status", "in", '("CANCELLED","EXPIRED")')
     .order("check_in", { ascending: true });
@@ -319,12 +338,108 @@ export async function getPropertyOccupiedDateRanges(
     return [];
   }
 
-  return data.map((row) => ({
-    id: String(row.id),
-    checkIn: String(row.check_in),
-    checkOut: String(row.check_out),
-    status: String(row.status),
-  }));
+  const now = new Date();
+  return data
+    .filter(
+      (row) =>
+        !isBookingHoldExpired(
+          String(row.status),
+          row.hold_expires_at ? String(row.hold_expires_at) : null,
+          now
+        )
+    )
+    .map((row) => {
+      const status = String(row.status);
+      const holdExpiresAt = row.hold_expires_at
+        ? String(row.hold_expires_at)
+        : null;
+      const hostConfirmedAt = row.host_confirmed_at
+        ? String(row.host_confirmed_at)
+        : null;
+
+      return {
+        id: String(row.id),
+        checkIn: String(row.check_in),
+        checkOut: String(row.check_out),
+        status,
+        holdExpiresAt,
+        hostConfirmedAt,
+        occupancyKind: resolveOccupancyKind(
+          { status, holdExpiresAt, hostConfirmedAt },
+          now
+        ),
+      };
+    });
+}
+
+/**
+ * Consulta agrupada por propiedad de los rangos ocupados o en reserva parcial
+ * para el panel de anfitriones, sin exponer datos personales de huéspedes.
+ */
+export async function getPropertiesOccupiedDateRangesMap(
+  propertyIds: string[]
+): Promise<Record<string, OccupiedDateRange[]>> {
+  const cleanIds = Array.from(
+    new Set(propertyIds.map((id) => id.trim()).filter(Boolean))
+  );
+  if (cleanIds.length === 0) return {};
+
+  const supabase = await getPublicSupabaseClient();
+
+  try {
+    await supabase.rpc("expire_stale_booking_holds", {
+      p_property_id: null,
+    });
+  } catch {
+    // Filtrado defensivo en memoria debajo
+  }
+
+  const { data, error } = await supabase
+    .from("bookings")
+    .select(
+      "id, property_id, check_in, check_out, status, hold_expires_at, host_confirmed_at"
+    )
+    .in("property_id", cleanIds)
+    .not("status", "in", '("CANCELLED","EXPIRED")')
+    .order("check_in", { ascending: true });
+
+  const grouped: Record<string, OccupiedDateRange[]> = {};
+  for (const id of cleanIds) {
+    grouped[id] = [];
+  }
+
+  if (error || !data) {
+    return grouped;
+  }
+
+  const now = new Date();
+  for (const row of data) {
+    const status = String(row.status);
+    const holdExpiresAt = row.hold_expires_at
+      ? String(row.hold_expires_at)
+      : null;
+    if (isBookingHoldExpired(status, holdExpiresAt, now)) continue;
+
+    const hostConfirmedAt = row.host_confirmed_at
+      ? String(row.host_confirmed_at)
+      : null;
+    const propId = String(row.property_id);
+    if (!grouped[propId]) grouped[propId] = [];
+    grouped[propId]!.push({
+      id: String(row.id),
+      checkIn: String(row.check_in),
+      checkOut: String(row.check_out),
+      status,
+      holdExpiresAt,
+      hostConfirmedAt,
+      occupancyKind: resolveOccupancyKind(
+        { status, holdExpiresAt, hostConfirmedAt },
+        now
+      ),
+    });
+  }
+
+  return grouped;
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   type UpdatePropertyInput,
   type PropertyImageItem,
 } from "./validators";
+import { DEFAULT_MID_TERM_POLICY } from "./mid-term-policy";
 import {
   PUBLIC_PROPERTY_COLUMNS,
   PUBLIC_CONSORTIUM_COLUMNS,
@@ -67,38 +68,26 @@ export async function createPropertyAction(
     };
   }
 
-  // Garantizar que el perfil exista en `public.profiles` con rol HOST antes del INSERT
+  // Garantizar que el perfil esté aprobado como Anfitrión antes del INSERT
   const { data: existingProfile } = await supabase
     .from("profiles")
-    .select("id, role")
+    .select("id, role, host_approval_status")
     .eq("id", user.id)
     .maybeSingle();
 
-  if (!existingProfile) {
-    const { error: profileInsertErr } = await supabase.from("profiles").insert({
-      id: user.id,
-      email: user.email ?? `${user.id}@i-bita.ar`,
-      full_name:
-        (user.user_metadata?.full_name as string | undefined) ??
-        user.email?.split("@")[0] ??
-        "Anfitrión I-bita",
-      role: "HOST",
-    });
+  const isApprovedHost =
+    existingProfile?.role === "SUPERADMIN" ||
+    existingProfile?.host_approval_status === "APPROVED";
 
-    if (profileInsertErr) {
-      return {
-        ok: false,
-        error: {
-          code: "INTERNAL_ERROR",
-          message: `No se pudo inicializar el perfil de Anfitrión: ${profileInsertErr.message}`,
-        },
-      };
-    }
-  } else if (existingProfile.role === "GUEST") {
-    await supabase
-      .from("profiles")
-      .update({ role: "HOST", updated_at: new Date().toISOString() })
-      .eq("id", user.id);
+  if (!isApprovedHost) {
+    return {
+      ok: false,
+      error: {
+        code: "FORBIDDEN",
+        message:
+          "Tu perfil de anfitrión todavía necesita aprobación antes de publicar propiedades.",
+      },
+    };
   }
 
   // Generar UUID en el servidor y cifrar el PIN con AES-256-GCM vinculando propertyId como AAD
@@ -146,6 +135,7 @@ export async function createPropertyAction(
       access_code_ciphertext: encryptedPin.ciphertext,
       access_code_iv: encryptedPin.iv,
       access_code_auth_tag: encryptedPin.authTag,
+      mid_term_policy: parsed.data.midTermPolicy ?? DEFAULT_MID_TERM_POLICY,
       is_published: parsed.data.is_published,
     })
     .select(PUBLIC_PROPERTY_COLUMNS)
@@ -215,11 +205,15 @@ export async function updatePropertyAction(
     };
   }
 
-  const { id, accessCodePlain, ...restFields } = parsed.data;
+  const { id, accessCodePlain, midTermPolicy, ...restFields } = parsed.data;
   const updatePayload: Record<string, unknown> = {
     ...restFields,
     updated_at: new Date().toISOString(),
   };
+
+  if (midTermPolicy !== undefined) {
+    updatePayload.mid_term_policy = midTermPolicy;
+  }
 
   if (accessCodePlain && accessCodePlain.trim().length >= 4) {
     const encryptedPin = encryptAccessCode(accessCodePlain.trim(), id);

@@ -26,11 +26,11 @@ async function runMigration() {
   loadEnvLocal();
   const { env } = await import("../src/env");
 
-  const sqlPath = path.resolve(
-    process.cwd(),
-    "supabase/migrations/0001_initial_schema_and_rls.sql"
-  );
-  const sql = fs.readFileSync(sqlPath, "utf8");
+  const migrationsDir = path.resolve(process.cwd(), "supabase/migrations");
+  const migrationFiles = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort((a, b) => a.localeCompare(b));
 
   const client = new Client({
     connectionString: env.DATABASE_URL,
@@ -42,14 +42,20 @@ async function runMigration() {
   await client.connect();
 
   try {
-    await client.query(sql);
+    for (const file of migrationFiles) {
+      const sqlPath = path.join(migrationsDir, file);
+      const sql = fs.readFileSync(sqlPath, "utf8");
+      console.log(`[MIGRATE] Applying ${file}...`);
+      await client.query(sql);
+    }
+
     const tablesRes = await client.query(`
       SELECT tablename, rowsecurity
       FROM pg_tables
       WHERE schemaname = 'public'
       ORDER BY tablename;
     `);
-    console.log("[MIGRATE] Migration 0001 applied successfully. Public tables & RLS:");
+    console.log("[MIGRATE] Migrations applied successfully. Public tables & RLS:");
     for (const row of tablesRes.rows) {
       console.log(`  - public.${row.tablename} (RLS: ${row.rowsecurity})`);
     }
