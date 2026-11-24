@@ -6,7 +6,7 @@ const cspHeader = [
   "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'unsafe-inline' blob: https://sdk.mercadopago.com https://cdn.jsdelivr.net https://fastly.jsdelivr.net",
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' blob: data: https://*.supabase.co https://images.unsplash.com",
+  "img-src 'self' blob: data: https://*.supabase.co https://images.unsplash.com https://*.afip.gob.ar https://*.arca.gob.ar",
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://api.mercadopago.com https://polygon-bor-rpc.publicnode.com https://generativelanguage.googleapis.com https://cdn.jsdelivr.net https://fastly.jsdelivr.net https://storage.googleapis.com",
   "frame-src 'self' https://maps.google.com https://www.google.com https://www.openstreetmap.org",

@@ -2,6 +2,7 @@
 
 import "server-only";
 import crypto from "node:crypto";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { Client } from "pg";
 import { env } from "@/env";
@@ -18,6 +19,7 @@ import {
   StayPurposeSchema,
   CONTRACT_STORAGE_BUCKET,
   type AgreementKind,
+  type ContractAuditLogEntry,
   type ContractRecord,
 } from "./types";
 
@@ -198,6 +200,80 @@ function resolveContractAgreementKind(
   return "MID_TERM_ART1199";
 }
 
+async function resolveSignerMetadata(fallbackIp?: string | null): Promise<{
+  ipAddress: string;
+  userAgent: string;
+}> {
+  let ipAddress = fallbackIp?.trim() || "127.0.0.1";
+  let userAgent = "unknown";
+  try {
+    const reqHeaders = await headers();
+    const xff = reqHeaders.get("x-forwarded-for");
+    const xri = reqHeaders.get("x-real-ip");
+    const headerIp = (xff?.split(",")[0] ?? xri ?? "").trim();
+    if (headerIp) ipAddress = headerIp.slice(0, 120);
+    const ua = reqHeaders.get("user-agent")?.trim();
+    if (ua) userAgent = ua.slice(0, 400);
+  } catch {
+    // Ejecución fuera del ciclo HTTP de Next.js
+  }
+  return { ipAddress, userAgent };
+}
+
+async function fetchContractAuditLogs(
+  pg: Client,
+  contractId: string
+): Promise<ContractAuditLogEntry[]> {
+  try {
+    const res = await pg.query<{
+      id: string;
+      contract_id: string;
+      booking_id: string;
+      document_sha256_hash: string;
+      signer_user_id: string | null;
+      signer_role: "huesped" | "anfitrion";
+      email: string;
+      signed_at_utc: Date | string;
+      ip_address: string;
+      user_agent: string;
+      otp_verified_at: Date | string | null;
+      otp_channel: string | null;
+    }>(
+      `SELECT id, contract_id, booking_id, document_sha256_hash, signer_user_id,
+              signer_role, email, signed_at_utc, ip_address, user_agent,
+              otp_verified_at, otp_channel
+       FROM public.contract_audit_logs
+       WHERE contract_id = $1
+       ORDER BY signed_at_utc ASC`,
+      [contractId]
+    );
+
+    return res.rows.map((r) => ({
+      id: r.id,
+      contractId: r.contract_id,
+      bookingId: r.booking_id,
+      documentSha256Hash: r.document_sha256_hash,
+      signerUserId: r.signer_user_id,
+      signerRole: r.signer_role,
+      email: r.email,
+      signedAtUtc:
+        r.signed_at_utc instanceof Date
+          ? r.signed_at_utc.toISOString()
+          : new Date(r.signed_at_utc).toISOString(),
+      ipAddress: r.ip_address,
+      userAgent: r.user_agent,
+      otpVerifiedAt: r.otp_verified_at
+        ? r.otp_verified_at instanceof Date
+          ? r.otp_verified_at.toISOString()
+          : new Date(r.otp_verified_at).toISOString()
+        : null,
+      otpChannel: r.otp_channel,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function toErr(err: unknown): { ok: false; error: { code: AppError["code"]; message: string } } {
   const appErr =
     err instanceof AppError
@@ -218,6 +294,8 @@ export async function generateAndSignContractAction(
     role?: "GUEST" | "HOST";
     signerIp?: string | null;
     agreementKind?: AgreementKind;
+    otpVerifiedAt?: string | null;
+    otpChannel?: "EMAIL_OTP" | null;
   } = {},
   inviteToken?: string | null
 ): Promise<ActionResult<ContractRecord>> {
@@ -278,6 +356,7 @@ export async function generateAndSignContractAction(
 
     const now = new Date();
     const effectiveRole = options.role ?? (auth.isHost ? "HOST" : "GUEST");
+    const signerMeta = await resolveSignerMetadata(options.signerIp);
 
     const guestSignedAt =
       effectiveRole === "GUEST"
@@ -288,7 +367,7 @@ export async function generateAndSignContractAction(
 
     const guestSignerIp =
       effectiveRole === "GUEST"
-        ? options.signerIp ?? "127.0.0.1"
+        ? signerMeta.ipAddress
         : existing?.guest_signer_ip ?? null;
 
     const hostSignedAt =
@@ -415,6 +494,50 @@ export async function generateAndSignContractAction(
         500
       );
     }
+
+    // 5. Evidencia probatoria inmutable (Ley 25.506 / Art. 288 CCCN)
+    const signerRoleDb = effectiveRole === "HOST" ? "anfitrion" : "huesped";
+    const signerUserIdDb =
+      effectiveRole === "HOST" ? auth.hostId : auth.guestId;
+    const signerEmailDb =
+      effectiveRole === "HOST"
+        ? auth.hostEmail || "anfitrion@i-bita.ar"
+        : auth.guestEmail;
+    const parsedOtpAt = options.otpVerifiedAt
+      ? new Date(options.otpVerifiedAt)
+      : null;
+
+    await pg.query(
+      `INSERT INTO public.contract_audit_logs (
+         contract_id, booking_id, document_sha256_hash, signer_user_id,
+         signer_role, email, signed_at_utc, ip_address, user_agent,
+         otp_verified_at, otp_channel, metadata
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+      [
+        record.id,
+        auth.bookingId,
+        record.pdf_sha256_hash,
+        signerUserIdDb,
+        signerRoleDb,
+        signerEmailDb,
+        now,
+        signerMeta.ipAddress,
+        signerMeta.userAgent,
+        parsedOtpAt && !Number.isNaN(parsedOtpAt.getTime()) ? parsedOtpAt : null,
+        options.otpChannel ?? null,
+        JSON.stringify({
+          agreementKind: resolveContractAgreementKind(
+            record.pdf_storage_path,
+            auth.nightsCount,
+            auth.isMidTerm
+          ),
+          stayPurpose,
+          legalFramework: "Ley 25.506 / Art. 288 CCCN",
+        }),
+      ]
+    );
+
+    const auditLogs = await fetchContractAuditLogs(pg, record.id);
     const isFullySigned = Boolean(record.guest_signed_at && record.host_signed_at);
 
     return {
@@ -435,6 +558,7 @@ export async function generateAndSignContractAction(
         hostSignedAt: record.host_signed_at ? new Date(record.host_signed_at).toISOString() : null,
         createdAt: new Date(record.created_at).toISOString(),
         isFullySigned,
+        auditLogs,
       },
     };
   } catch (err) {
@@ -510,6 +634,8 @@ export async function getContractDetailsAction(
       return { ok: true, data: null };
     }
 
+    const auditLogs = await fetchContractAuditLogs(pg, r.id);
+
     return {
       ok: true,
       data: {
@@ -528,6 +654,7 @@ export async function getContractDetailsAction(
         hostSignedAt: r.host_signed_at ? new Date(r.host_signed_at).toISOString() : null,
         createdAt: new Date(r.created_at).toISOString(),
         isFullySigned: Boolean(r.guest_signed_at && r.host_signed_at),
+        auditLogs,
       },
     };
   } catch (err) {

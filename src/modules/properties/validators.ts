@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { AppError } from "@/lib/errors/app-error";
+import {
+  ARGENTINE_JURISDICTIONS,
+  defaultJurisdictionForCorridor,
+  requiresRpattRegistration,
+} from "@/lib/compliance/feature-flags";
 import { MidTermPolicySchema } from "./mid-term-policy";
+
+export const PROPERTY_REGULATORY_STATUSES = [
+  "activo",
+  "suspendido_autoridad",
+] as const;
+
+export type PropertyRegulatoryStatus =
+  (typeof PROPERTY_REGULATORY_STATUSES)[number];
 
 export const PROPERTY_CORRIDORS = [
   "CABA",
@@ -163,6 +176,22 @@ export const CreatePropertyBaseSchema = z.object({
         "Corredor geográfico inválido. Valores permitidos: CABA, COSTA_ATLANTICA, CORDOBA, VACA_MUERTA",
     }),
   }),
+  jurisdiccion: z
+    .enum(ARGENTINE_JURISDICTIONS, {
+      errorMap: () => ({
+        message: "Jurisdicción argentina inválida.",
+      }),
+    })
+    .optional(),
+  numero_registro_turistico: z
+    .string()
+    .trim()
+    .max(80, "El número de inscripción turística no puede superar 80 caracteres")
+    .nullable()
+    .optional(),
+  estado_regulatorio: z
+    .enum(PROPERTY_REGULATORY_STATUSES)
+    .default("activo"),
   address_line: z
     .string()
     .trim()
@@ -237,39 +266,93 @@ export type CreatePropertyInput = z.input<typeof CreatePropertyBaseSchema> & {
   absorbInstallmentsCost?: boolean;
   acceptsUsdt?: boolean;
   wifiSpeedMbps?: number | null;
+  numeroRegistroTuristico?: string | null;
+  estadoRegulatorio?: PropertyRegulatoryStatus;
   isPublished?: boolean;
 };
 
 export type CreatePropertyPayload = z.output<typeof CreatePropertyBaseSchema>;
 
-export const CreatePropertySchema = z.preprocess((raw) => {
-  if (!raw || typeof raw !== "object") return raw;
-  const obj = raw as Record<string, unknown>;
-  return {
-    ...obj,
-    address_line: obj.address_line ?? obj.addressLine,
-    unit_identifier: obj.unit_identifier ?? obj.unitIdentifier,
-    max_adults: obj.max_adults ?? obj.maxAdults,
-    base_currency: obj.base_currency ?? obj.baseCurrency,
-    nightly_rate: obj.nightly_rate ?? obj.nightlyRate,
-    monthly_discount_pct: obj.monthly_discount_pct ?? obj.monthlyDiscountPct ?? 20,
-    absorb_installments_cost:
-      obj.absorb_installments_cost ?? obj.absorbInstallmentsCost ?? false,
-    accepts_usdt: obj.accepts_usdt ?? obj.acceptsUsdt ?? true,
-    wifi_speed_mbps: obj.wifi_speed_mbps ?? obj.wifiSpeedMbps ?? 300,
-    midTermPolicy: obj.midTermPolicy ?? obj.mid_term_policy,
-    is_published: obj.is_published ?? obj.isPublished ?? true,
-  };
-}, CreatePropertyBaseSchema);
+export const CreatePropertySchema = z
+  .preprocess((raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const obj = raw as Record<string, unknown>;
+    const rawCorridor = obj.corridor as string | undefined;
+    const hasExplicitJurisdiccion = obj.jurisdiccion !== undefined;
+    const resolvedJurisdiccion =
+      obj.jurisdiccion ?? defaultJurisdictionForCorridor(rawCorridor);
+    return {
+      ...obj,
+      address_line: obj.address_line ?? obj.addressLine,
+      unit_identifier: obj.unit_identifier ?? obj.unitIdentifier,
+      max_adults: obj.max_adults ?? obj.maxAdults,
+      base_currency: obj.base_currency ?? obj.baseCurrency,
+      nightly_rate: obj.nightly_rate ?? obj.nightlyRate,
+      monthly_discount_pct:
+        obj.monthly_discount_pct ?? obj.monthlyDiscountPct ?? 20,
+      absorb_installments_cost:
+        obj.absorb_installments_cost ?? obj.absorbInstallmentsCost ?? false,
+      accepts_usdt: obj.accepts_usdt ?? obj.acceptsUsdt ?? true,
+      wifi_speed_mbps: obj.wifi_speed_mbps ?? obj.wifiSpeedMbps ?? 300,
+      jurisdiccion: resolvedJurisdiccion,
+      numero_registro_turistico:
+        obj.numero_registro_turistico ??
+        obj.numeroRegistroTuristico ??
+        (hasExplicitJurisdiccion ? "" : undefined),
+      estado_regulatorio:
+        obj.estado_regulatorio ?? obj.estadoRegulatorio ?? "activo",
+      midTermPolicy: obj.midTermPolicy ?? obj.mid_term_policy,
+      is_published: obj.is_published ?? obj.isPublished ?? true,
+    };
+  }, CreatePropertyBaseSchema)
+  .superRefine((val, ctx) => {
+    const j = val.jurisdiccion ?? defaultJurisdictionForCorridor(val.corridor);
+    if (
+      requiresRpattRegistration(j) &&
+      val.numero_registro_turistico !== undefined &&
+      (!val.numero_registro_turistico ||
+        val.numero_registro_turistico.trim().length < 3)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["numero_registro_turistico"],
+        message:
+          "Número de inscripción RPATT - Ley 6255 obligatorio para propiedades en CABA (estadías de 1 noche a 3 meses).",
+      });
+    }
+  });
 
-export const UpdatePropertySchema = CreatePropertyBaseSchema.partial().extend({
-  id: z.string().uuid("ID de propiedad inválido"),
-  accessCodePlain: z
-    .string()
-    .trim()
-    .min(4, "El nuevo PIN de acceso debe tener al menos 4 caracteres")
-    .max(240, "El PIN de acceso no puede superar los 240 caracteres")
-    .optional(),
+export const UpdatePropertySchema = CreatePropertyBaseSchema.partial()
+  .extend({
+    id: z.string().uuid("ID de propiedad inválido"),
+    accessCodePlain: z
+      .string()
+      .trim()
+      .min(4, "El nuevo PIN de acceso debe tener al menos 4 caracteres")
+      .max(240, "El PIN de acceso no puede superar los 240 caracteres")
+      .optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (
+      val.jurisdiccion !== undefined &&
+      requiresRpattRegistration(val.jurisdiccion) &&
+      val.numero_registro_turistico !== undefined &&
+      (!val.numero_registro_turistico ||
+        val.numero_registro_turistico.trim().length < 3)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["numero_registro_turistico"],
+        message:
+          "Número de inscripción RPATT - Ley 6255 obligatorio para propiedades en CABA.",
+      });
+    }
+  });
+
+export const SetPropertyRegulatoryStatusSchema = z.object({
+  propertyId: z.string().uuid("ID de propiedad inválido"),
+  estadoRegulatorio: z.enum(PROPERTY_REGULATORY_STATUSES),
+  reason: z.string().trim().max(500).optional(),
 });
 
 export type UpdatePropertyInput = z.input<typeof UpdatePropertySchema>;

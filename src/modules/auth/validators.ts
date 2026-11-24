@@ -5,6 +5,11 @@ import {
   WEEKDAY_CODES,
   type MaxResponseHours,
 } from "@/lib/host/response-schedule";
+import {
+  ARGENTINE_JURISDICTIONS,
+  isCryptoPaymentsEnabled,
+  requiresRpattRegistration,
+} from "@/lib/compliance/feature-flags";
 
 /**
  * Valida el dígito verificador Módulo 11 de un CUIT/CUIL argentino (11 dígitos).
@@ -87,17 +92,67 @@ export const HostOnboardingSchema = z.object({
   payoutUsdtWallet: z
     .string()
     .trim()
-    .refine((addr) => isAddress(addr, { strict: false }), "La dirección de Wallet USDT no es una dirección EVM/Polygon válida")
-    .transform((addr) => getAddress(addr)),
+    .optional()
+    .default("")
+    .transform((addr) => {
+      const clean = addr.trim();
+      if (!clean) return "";
+      return isAddress(clean, { strict: false }) ? getAddress(clean) : clean;
+    }),
   payoutSplitArsPct: z.coerce
     .number()
     .min(0, "El porcentaje en ARS debe estar entre 0% y 100%")
     .max(100, "El porcentaje en ARS debe estar entre 0% y 100%"),
+  jurisdiccionPrincipal: z
+    .enum(ARGENTINE_JURISDICTIONS, {
+      errorMap: () => ({
+        message: "Seleccioná la jurisdicción principal donde ofrecés propiedades.",
+      }),
+    })
+    .default("CABA"),
+  numeroRegistroTuristico: z
+    .string()
+    .trim()
+    .max(80, "El número de inscripción turística no puede superar 80 caracteres")
+    .optional()
+    .default(""),
+  ddjjConsorcioAccepted: z.literal(true, {
+    errorMap: () => ({
+      message:
+        "Debés aceptar la Declaración Jurada Digital sobre reglamento de copropiedad, portería y seguro de responsabilidad civil.",
+    }),
+  }),
   responseSchedule: HostResponseScheduleSchema.optional(),
 });
 
 export const HostOnboardingSubmissionSchema = HostOnboardingSchema.extend({
   responseSchedule: HostResponseScheduleSchema,
+}).superRefine((val, ctx) => {
+  const cryptoEnabled = isCryptoPaymentsEnabled();
+  const wallet = (val.payoutUsdtWallet ?? "").trim();
+
+  if (cryptoEnabled || val.payoutSplitArsPct < 100 || wallet.length > 0) {
+    if (!wallet || !isAddress(wallet, { strict: false })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["payoutUsdtWallet"],
+        message:
+          "La dirección de Wallet USDT no es una dirección EVM/Polygon válida",
+      });
+    }
+  }
+
+  if (
+    requiresRpattRegistration(val.jurisdiccionPrincipal) &&
+    val.numeroRegistroTuristico.trim().length < 3
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["numeroRegistroTuristico"],
+      message:
+        "Número de inscripción RPATT - Ley 6255 obligatorio para propiedades ubicadas en CABA (estadías de 1 noche a 3 meses).",
+    });
+  }
 });
 
 export type HostOnboardingInput = z.input<typeof HostOnboardingSubmissionSchema>;

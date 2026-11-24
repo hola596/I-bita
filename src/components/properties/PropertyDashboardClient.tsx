@@ -68,6 +68,14 @@ import { HostMidTermApplicationsPanel } from "./HostMidTermApplicationsPanel";
 import { ProgressiveFlowShell } from "@/components/ui/ProgressiveFlowShell";
 import { AchievementBanner } from "@/components/ui/AchievementBanner";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
+import {
+  ARGENTINE_JURISDICTIONS,
+  JURISDICTION_LABELS,
+  defaultJurisdictionForCorridor,
+  isCryptoPaymentsEnabled,
+  requiresRpattRegistration,
+  type ArgentineJurisdiction,
+} from "@/lib/compliance/feature-flags";
 
 const DEFAULT_COVER_PHOTO: PropertyImageItem = {
   url: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
@@ -318,21 +326,25 @@ export function PropertyDashboardClient({
   const [showSlugEditor, setShowSlugEditor] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const cryptoEnabled = isCryptoPaymentsEnabled();
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [description, setDescription] = useState("");
   const [corridor, setCorridor] = useState<PropertyCorridor>("CABA");
+  const [jurisdiccion, setJurisdiccion] =
+    useState<ArgentineJurisdiction>("CABA");
+  const [numeroRegistroTuristico, setNumeroRegistroTuristico] = useState("");
   const [addressLine, setAddressLine] = useState("");
   const [unitIdentifier, setUnitIdentifier] = useState("");
   const [maxAdults, setMaxAdults] = useState<number>(2);
-  const [baseCurrency, setBaseCurrency] = useState<PropertyCurrency>("USD");
-  const [nightlyRateInput, setNightlyRateInput] = useState<string>("65");
+  const [baseCurrency, setBaseCurrency] = useState<PropertyCurrency>("ARS");
+  const [nightlyRateInput, setNightlyRateInput] = useState<string>("65000");
   const [monthlyDiscountInput, setMonthlyDiscountInput] =
     useState<string>("20");
   const [wifiSpeedInput, setWifiSpeedInput] = useState<string>("300");
   const [absorbInstallmentsCost, setAbsorbInstallmentsCost] = useState(true);
-  const [acceptsUsdt, setAcceptsUsdt] = useState(true);
+  const [acceptsUsdt, setAcceptsUsdt] = useState(cryptoEnabled);
   const [accessCodePlain, setAccessCodePlain] = useState("");
   const [midTermPolicy, setMidTermPolicy] = useState<MidTermPolicy>(() =>
     cloneDefaultMidTermPolicy()
@@ -392,6 +404,10 @@ export function PropertyDashboardClient({
     setSlugManuallyEdited(true);
     setDescription(prop.description);
     setCorridor(prop.corridor);
+    setJurisdiccion(
+      prop.jurisdiccion ?? defaultJurisdictionForCorridor(prop.corridor)
+    );
+    setNumeroRegistroTuristico(prop.numero_registro_turistico ?? "");
     setAddressLine(prop.address_line);
     setUnitIdentifier(prop.unit_identifier);
     setMaxAdults(prop.max_adults);
@@ -419,15 +435,17 @@ export function PropertyDashboardClient({
     setSlugManuallyEdited(false);
     setDescription("");
     setCorridor("CABA");
+    setJurisdiccion("CABA");
+    setNumeroRegistroTuristico("");
     setAddressLine("");
     setUnitIdentifier("");
     setMaxAdults(2);
-    setBaseCurrency("USD");
-    setNightlyRateInput("65");
+    setBaseCurrency("ARS");
+    setNightlyRateInput("65000");
     setMonthlyDiscountInput("20");
     setWifiSpeedInput("300");
     setAbsorbInstallmentsCost(true);
-    setAcceptsUsdt(true);
+    setAcceptsUsdt(cryptoEnabled);
     setAccessCodePlain("");
     setMidTermPolicy(cloneDefaultMidTermPolicy());
     setImages([CURATED_OPTIMIZED_PHOTOS[0]]);
@@ -439,6 +457,8 @@ export function PropertyDashboardClient({
   const wizardValidationValues: PropertyWizardValidationValues = {
     addressLine,
     unitIdentifier,
+    jurisdiccion,
+    numeroRegistroTuristico,
     title,
     slug,
     description,
@@ -593,6 +613,8 @@ export function PropertyDashboardClient({
         slug,
         description,
         corridor,
+        jurisdiccion,
+        numero_registro_turistico: numeroRegistroTuristico.trim() || null,
         address_line: addressLine,
         unit_identifier: unitIdentifier,
         max_adults: Number(maxAdults),
@@ -601,7 +623,7 @@ export function PropertyDashboardClient({
         monthly_discount_pct: parsedMonthlyDiscount,
         wifi_speed_mbps: parsedWifiSpeed,
         absorb_installments_cost: absorbInstallmentsCost,
-        accepts_usdt: acceptsUsdt,
+        accepts_usdt: cryptoEnabled ? acceptsUsdt : false,
         midTermPolicy,
         images,
         ...(accessCodePlain.trim().length >= 4
@@ -636,6 +658,8 @@ export function PropertyDashboardClient({
       slug,
       description,
       corridor,
+      jurisdiccion,
+      numero_registro_turistico: numeroRegistroTuristico.trim() || null,
       address_line: addressLine,
       unit_identifier: unitIdentifier,
       max_adults: Number(maxAdults),
@@ -644,7 +668,7 @@ export function PropertyDashboardClient({
       monthly_discount_pct: parsedMonthlyDiscount,
       wifi_speed_mbps: parsedWifiSpeed,
       absorb_installments_cost: absorbInstallmentsCost,
-      accepts_usdt: acceptsUsdt,
+      accepts_usdt: cryptoEnabled ? acceptsUsdt : false,
       midTermPolicy,
       images,
       accessCodePlain,
@@ -677,6 +701,7 @@ export function PropertyDashboardClient({
 
   const addressIssue = getVisibleIssue("addressLine");
   const unitIssue = getVisibleIssue("unitIdentifier");
+  const rpattIssue = getVisibleIssue("numeroRegistroTuristico");
   const titleIssue = getVisibleIssue("title");
   const slugIssue = getVisibleIssue("slug");
   const descriptionIssue = getVisibleIssue("description");
@@ -967,7 +992,10 @@ export function PropertyDashboardClient({
                           <button
                             key={c}
                             type="button"
-                            onClick={() => setCorridor(c)}
+                            onClick={() => {
+                              setCorridor(c);
+                              setJurisdiccion(defaultJurisdictionForCorridor(c));
+                            }}
                             aria-pressed={selected}
                             className={`rounded-2xl border-2 px-3.5 py-2.5 text-left text-xs font-extrabold transition-colors cursor-pointer ${
                               selected
@@ -979,6 +1007,77 @@ export function PropertyDashboardClient({
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label
+                        htmlFor="prop-jurisdiccion"
+                        className="block text-xs font-extrabold mb-1.5"
+                      >
+                        Jurisdicción legal *
+                      </label>
+                      <select
+                        id="prop-jurisdiccion"
+                        name="jurisdiccion"
+                        value={jurisdiccion}
+                        onChange={(e) => {
+                          setJurisdiccion(
+                            e.target.value as ArgentineJurisdiction
+                          );
+                          markTouched("numeroRegistroTuristico");
+                        }}
+                        className="min-h-[48px] w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-xs font-semibold focus:border-[var(--brand-primary)] focus:outline-none"
+                      >
+                        {ARGENTINE_JURISDICTIONS.map((jur) => (
+                          <option key={jur} value={jur}>
+                            {JURISDICTION_LABELS[jur]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="prop-rpatt"
+                        className="block text-xs font-extrabold mb-1.5"
+                      >
+                        {requiresRpattRegistration(jurisdiccion)
+                          ? "Número de inscripción RPATT - Ley 6255 *"
+                          : "Registro turístico local (opcional)"}
+                      </label>
+                      <input
+                        id="prop-rpatt"
+                        name="numeroRegistroTuristico"
+                        type="text"
+                        required={requiresRpattRegistration(jurisdiccion)}
+                        maxLength={80}
+                        value={numeroRegistroTuristico}
+                        onChange={(e) => {
+                          setNumeroRegistroTuristico(e.target.value);
+                          markTouched("numeroRegistroTuristico");
+                        }}
+                        onBlur={() => markTouched("numeroRegistroTuristico")}
+                        aria-invalid={Boolean(rpattIssue)}
+                        aria-describedby={
+                          rpattIssue ? "prop-rpatt-error" : undefined
+                        }
+                        placeholder={
+                          requiresRpattRegistration(jurisdiccion)
+                            ? "Ej: RL-2026-12345678-GCABA"
+                            : "Código municipal si aplica"
+                        }
+                        className={`min-h-[48px] w-full rounded-2xl border bg-[var(--bg-primary)] px-3.5 text-xs sm:text-sm font-mono font-semibold focus:outline-none ${
+                          rpattIssue
+                            ? `border-2 ${INVALID_INPUT_CLASS}`
+                            : "border-[var(--border-subtle)] focus:border-[var(--brand-primary)]"
+                        }`}
+                      />
+                      <FieldErrorHint
+                        issue={rpattIssue}
+                        id="prop-rpatt-error"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1206,7 +1305,9 @@ export function PropertyDashboardClient({
                       Moneda base de publicación
                     </span>
                     <div className="grid grid-cols-3 gap-2">
-                      {PROPERTY_CURRENCIES.map((curr) => (
+                      {PROPERTY_CURRENCIES.filter(
+                        (curr) => cryptoEnabled || curr !== "USDT"
+                      ).map((curr) => (
                         <button
                           key={curr}
                           type="button"
@@ -1332,15 +1433,21 @@ export function PropertyDashboardClient({
                       <span>Ofrecer 3 y 6 cuotas en Pesos</span>
                     </label>
 
-                    <label className="flex items-center gap-2.5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 text-xs font-bold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={acceptsUsdt}
-                        onChange={(e) => setAcceptsUsdt(e.target.checked)}
-                        className="h-4 w-4 accent-[var(--brand-primary)]"
-                      />
-                      <span>Aceptar USDT (Polygon)</span>
-                    </label>
+                    {cryptoEnabled ? (
+                      <label className="flex items-center gap-2.5 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 text-xs font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={acceptsUsdt}
+                          onChange={(e) => setAcceptsUsdt(e.target.checked)}
+                          className="h-4 w-4 accent-[var(--brand-primary)]"
+                        />
+                        <span>Aceptar USDT (Polygon)</span>
+                      </label>
+                    ) : (
+                      <div className="flex items-center rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3.5 py-2.5 text-[11px] font-semibold text-[var(--text-secondary)]">
+                        Cobros activos solo en ARS (USDT pausado por adecuación CNV PSAV).
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1678,6 +1785,11 @@ export function PropertyDashboardClient({
                           <span className="rounded-full bg-black/75 text-white px-2.5 py-1 text-[11px] font-bold">
                             {prop.corridor}
                           </span>
+                          {prop.estado_regulatorio === "suspendido_autoridad" && (
+                            <span className="rounded-full bg-red-700 text-white px-2.5 py-1 text-[11px] font-extrabold">
+                              Suspendido por autoridad
+                            </span>
+                          )}
                         </div>
                       </div>
 

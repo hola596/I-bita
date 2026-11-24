@@ -47,6 +47,8 @@ import {
 import { usePropertyDateSelection } from "./PropertyDateSelectionContext";
 import { PropertyAvailabilityCalendar } from "./PropertyAvailabilityCalendar";
 import { PartialHoldStatusCard } from "./PartialHoldStatusCard";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
+import { ComplianceInfoTooltip } from "@/components/ui/ComplianceInfoTooltip";
 
 export interface StickyBookingWidgetProps {
   propertyId: string;
@@ -184,13 +186,15 @@ export function StickyBookingWidget({
     }
   }, [midTermPolicy.interviewChannels, preferredInterviewChannel]);
 
+  const effectiveAcceptsUsdt = acceptsUsdt && isCryptoPaymentsEnabled();
+
   useEffect(() => {
-    if (globalCurrency === "USDT" && !acceptsUsdt) {
+    if (globalCurrency === "USDT" && !effectiveAcceptsUsdt) {
       setPaymentCurrency("ARS");
       return;
     }
     setPaymentCurrency(globalCurrency);
-  }, [globalCurrency, acceptsUsdt]);
+  }, [globalCurrency, effectiveAcceptsUsdt]);
 
   const nights = useMemo(
     () => calculateNightsBetweenDates(checkIn, checkOut),
@@ -464,7 +468,7 @@ export function StickyBookingWidget({
             <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
             Pesos
           </button>
-          {acceptsUsdt && (
+          {effectiveAcceptsUsdt && (
             <button
               type="button"
               onClick={() => handleCurrencySwitch("USDT")}
@@ -812,8 +816,12 @@ export function StickyBookingWidget({
                     3. ¿En cuántos pagos preferís?
                   </p>
                   {absorbInstallmentsCost && (
-                    <span className="rounded-full bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] px-2.5 py-0.5 text-[10px] font-extrabold">
-                      Cuotas sin interés
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] px-2.5 py-0.5 text-[10px] font-extrabold">
+                      <span>Cuotas disponibles</span>
+                      <ComplianceInfoTooltip
+                        label="Condiciones de financiación en cuotas"
+                        explanation="Cuotas sujetas a condiciones, promociones y costos financieros vigentes del procesador de pagos (Mercado Pago)."
+                      />
                     </span>
                   )}
                 </div>
@@ -853,7 +861,7 @@ export function StickyBookingWidget({
                       "ARS"
                     )}
                   </strong>{" "}
-                  con Mercado Pago o MODO.
+                  con Mercado Pago (sujeto a condiciones vigentes del procesador).
                 </p>
               </div>
             )}
@@ -978,6 +986,8 @@ export function StickyBookingWidget({
                 Tus fechas quedan apartadas de forma parcial por{" "}
                 <strong className="text-[var(--text-primary)]">1 hora</strong>{" "}
                 hasta que se acredite el pago y el anfitrión confirme la estadía.
+                El contrato se celebra directamente entre Anfitrión y Huésped;
+                I-bita actúa únicamente como plataforma tecnológica.
               </p>
             )}
           </div>

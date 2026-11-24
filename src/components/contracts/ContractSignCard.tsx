@@ -231,8 +231,8 @@ export function ContractSignCard({
         />
         <span>
           {isShortStay
-            ? "Sí, leí el resumen y acepto este acuerdo simple para continuar con mi reserva."
-            : "Sí, leí el resumen y estoy de acuerdo con las condiciones de este alquiler temporario."}
+            ? "Sí, leí el resumen y acepto este acuerdo directo entre Anfitrión y Huésped (I-bita provee únicamente la plataforma tecnológica de software y sellado)."
+            : "Sí, leí el resumen y acepto celebrar este contrato de locación temporaria directa y exclusivamente con la contraparte (I-bita no actúa como inmobiliaria)."}
         </span>
       </label>
 
@@ -622,12 +622,45 @@ export function ContractSignCard({
       {contract?.pdfSha256Hash && (
         <ProgressiveDisclosure
           icon="shield"
-          title="Ver comprobante técnico de integridad"
-          subtitle="Código único que asegura que el PDF no fue alterado después de firmarse."
+          title="Ver comprobante técnico y auditoría probatoria (Ley 25.506)"
+          subtitle="Sello criptográfico SHA-256 y registro inmutable de firma electrónica (Art. 288 CCCN)."
         >
-          <p className="font-mono text-xs break-all text-[var(--text-primary)]">
-            Sello SHA-256: {contract.pdfSha256Hash}
-          </p>
+          <div className="space-y-3 text-xs">
+            <p className="font-mono break-all text-[var(--text-primary)]">
+              <strong>Sello SHA-256 del documento:</strong> {contract.pdfSha256Hash}
+            </p>
+            {contract.auditLogs && contract.auditLogs.length > 0 && (
+              <div className="space-y-2 border-t border-[var(--border-subtle)] pt-3">
+                <p className="font-extrabold text-[var(--text-primary)]">
+                  Registro inmutable de firmas ({contract.auditLogs.length}):
+                </p>
+                <ul className="space-y-2">
+                  {contract.auditLogs.map((log) => (
+                    <li
+                      key={log.id}
+                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3 font-mono text-[11px] space-y-0.5"
+                    >
+                      <p>
+                        <strong>Rol:</strong> {log.signerRole} ·{" "}
+                        <strong>Email:</strong> {log.email}
+                      </p>
+                      <p>
+                        <strong>Fecha UTC:</strong> {log.signedAtUtc} ·{" "}
+                        <strong>IP:</strong> {log.ipAddress}
+                      </p>
+                      <p className="truncate text-[var(--text-secondary)]">
+                        <strong>Agente:</strong> {log.userAgent} ·{" "}
+                        <strong>OTP:</strong>{" "}
+                        {log.otpVerifiedAt
+                          ? `${log.otpChannel || "EMAIL_OTP"} (${log.otpVerifiedAt})`
+                          : "Pendiente / no requerido en esta instancia"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </ProgressiveDisclosure>
       )}
     </div>

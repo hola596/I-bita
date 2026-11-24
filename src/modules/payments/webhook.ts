@@ -10,6 +10,7 @@ import {
   settleApprovedUsdtPayment,
 } from "./settlement";
 import { verifyUsdtPaymentReceipt } from "./usdt-onchain";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
 
 export interface WebhookHttpResult {
   status: number;
@@ -47,6 +48,18 @@ export async function handlePaymentsWebhook(
   const txHash = String(bodyJson.txHash ?? "");
 
   if (provider === "POLYGON_USDT" || txHash.startsWith("0x")) {
+    if (!isCryptoPaymentsEnabled()) {
+      return {
+        status: 503,
+        body: {
+          ok: false,
+          code: "REGULATORY_FEATURE_DISABLED",
+          message:
+            "La acreditación automática de USDT está deshabilitada por adecuación regulatoria PSAV CNV (NEXT_PUBLIC_ENABLE_CRYPTO_PAYMENTS=false).",
+        },
+      };
+    }
+
     if (!bookingId || !txHash) {
       return {
         status: 422,

@@ -36,6 +36,12 @@ import { PropertyDateSelectionProvider } from "@/components/booking/PropertyDate
 import { PropertyAvailabilityCalendar } from "@/components/booking/PropertyAvailabilityCalendar";
 import { getHostResponseMetricsSummary } from "@/modules/hosts/response-sla";
 import { HostResponseWindowCard } from "@/components/host/HostResponseWindowCard";
+import {
+  isCryptoPaymentsEnabled,
+  isDemoOrUnsplashProperty,
+  JURISDICTION_LABELS,
+} from "@/lib/compliance/feature-flags";
+import { ComplianceInfoTooltip } from "@/components/ui/ComplianceInfoTooltip";
 
 export const dynamic = "force-dynamic";
 
@@ -125,6 +131,14 @@ export default async function PropertyDirectMicrositePage({
   const enabledMidTermRequirements = midTermPolicy.requirements.filter(
     (req) => req.enabled
   );
+  const cryptoEnabled = isCryptoPaymentsEnabled();
+  const isDemoProperty = isDemoOrUnsplashProperty({
+    id: property.id,
+    slug: property.slug,
+    images: property.images,
+  });
+  const jurisdictionLabel =
+    JURISDICTION_LABELS[property.jurisdiccion] ?? property.jurisdiccion;
 
   const accommodationJsonLd = {
     "@context": "https://schema.org",
@@ -146,19 +160,21 @@ export default async function PropertyDirectMicrositePage({
     amenityFeature: [
       {
         "@type": "LocationFeatureSpecification",
-        name: "Edificio amigable · Pase Digital QR a Portería",
+        name: "Ingreso ordenado con pase QR a portería",
         value: true,
       },
       {
         "@type": "LocationFeatureSpecification",
-        name: "Financiación en ARS (1, 3 y 6 cuotas) y USDT Polygon",
+        name: cryptoEnabled
+          ? "Financiación en ARS (sujeta al procesador) y USDT Polygon"
+          : "Cobros en Pesos Argentinos (ARS) sujetos al procesador de pagos",
         value: true,
       },
       ...(property.wifi_speed_mbps
         ? [
           {
             "@type": "LocationFeatureSpecification",
-            name: `Wi-Fi Fibra Verificado (${property.wifi_speed_mbps} Mbps)`,
+            name: `Wi-Fi declarado por el anfitrión (${property.wifi_speed_mbps} Mbps)`,
             value: property.wifi_speed_mbps,
           },
         ]
@@ -187,10 +203,14 @@ export default async function PropertyDirectMicrositePage({
 
           <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-full bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] px-3.5 py-1 text-xs font-extrabold">
             <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
-            Pesos en 1, 3 y 6 cuotas
+            <span>Pesos en cuotas</span>
+            <ComplianceInfoTooltip
+              label="Condiciones de financiación en cuotas"
+              explanation="Cuotas sujetas a condiciones, tarjetas adheridas y promociones del procesador de pagos (Mercado Pago)."
+            />
           </span>
 
-          {property.accepts_usdt && (
+          {cryptoEnabled && property.accepts_usdt && (
             <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-full bg-[var(--badge-usdt-bg)] text-[var(--badge-usdt-text)] px-3.5 py-1 text-xs font-extrabold">
               <Coins className="h-3.5 w-3.5" aria-hidden="true" />
               Acepta USDT
@@ -203,7 +223,25 @@ export default async function PropertyDirectMicrositePage({
                 className="h-3.5 w-3.5 text-[var(--brand-primary)]"
                 aria-hidden="true"
               />
-              Wi-Fi {property.wifi_speed_mbps} Mbps
+              <span>Wi-Fi {property.wifi_speed_mbps} Mbps</span>
+              <ComplianceInfoTooltip
+                label="Alcance sobre velocidad de Wi-Fi"
+                explanation="Velocidad declarada y acreditada por el anfitrión al momento del alta de la unidad."
+              />
+            </span>
+          )}
+
+          {property.numero_registro_turistico && (
+            <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1 text-xs font-extrabold text-[var(--text-primary)]">
+              {property.jurisdiccion === "CABA"
+                ? `RPATT Ley 6255: ${property.numero_registro_turistico}`
+                : `Reg. Turístico: ${property.numero_registro_turistico}`}
+            </span>
+          )}
+
+          {isDemoProperty && (
+            <span className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 rounded-full bg-amber-400/95 px-3 py-1 text-xs font-black text-slate-950">
+              Propiedad de demostración · Imágenes ilustrativas
             </span>
           )}
 
@@ -273,6 +311,11 @@ export default async function PropertyDirectMicrositePage({
           <div className="hidden md:block absolute bottom-3 left-3 rounded-full bg-black/75 px-3 py-1 text-xs font-bold text-white backdrop-blur-xs">
             Vista principal · {property.unit_identifier}
           </div>
+          {isDemoProperty && (
+            <div className="absolute top-3 left-3 rounded-full bg-amber-400/95 px-3 py-1 text-[11px] font-black text-slate-950 shadow-sm">
+              Propiedad de demostración · Imágenes ilustrativas
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory no-scrollbar -mx-4 px-4 pb-1 md:contents md:m-0 md:p-0">
@@ -327,7 +370,10 @@ export default async function PropertyDirectMicrositePage({
                         Tu espacio en {corridorLabel}
                       </h2>
                       <p className="text-xs text-[var(--text-secondary)]">
-                        Reservás directo con el anfitrión, sin intermediarios costosos
+                        Contrato de locación celebrado directa y exclusivamente
+                        entre Anfitrión y Huésped. I-bita provee la plataforma
+                        tecnológica de publicación y calendario (no actúa como
+                        inmobiliaria).
                       </p>
                     </div>
                   </div>
@@ -348,21 +394,29 @@ export default async function PropertyDirectMicrositePage({
                     </span>
                   </div>
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-                    <span className="text-xs font-bold text-[var(--text-secondary)] block">
-                      Internet para trabajar
+                    <span className="text-xs font-bold text-[var(--text-secondary)] flex items-center gap-1">
+                      <span>Internet declarado</span>
+                      <ComplianceInfoTooltip
+                        label="Detalle sobre velocidad declarada"
+                        explanation="Velocidad declarada y acreditada por el anfitrión al momento del alta."
+                      />
                     </span>
                     <span className="text-sm font-extrabold">
                       {property.wifi_speed_mbps
-                        ? `${property.wifi_speed_mbps} Mbps de fibra`
-                        : "Alta velocidad"}
+                        ? `${property.wifi_speed_mbps} Mbps declarados`
+                        : "Declarado por anfitrión"}
                     </span>
                   </div>
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
                     <span className="text-xs font-bold text-[var(--text-secondary)] block">
-                      Estadía permitida
+                      Registro y jurisdicción
                     </span>
-                    <span className="text-sm font-extrabold">
-                      1 a 180 noches
+                    <span className="text-sm font-extrabold break-all">
+                      {property.numero_registro_turistico
+                        ? property.numero_registro_turistico
+                        : property.jurisdiccion === "CABA"
+                          ? "RPATT pendiente / +90 noches"
+                          : jurisdictionLabel}
                     </span>
                   </div>
                 </div>
@@ -589,7 +643,7 @@ export default async function PropertyDirectMicrositePage({
                 monthlyDiscountPct={property.monthly_discount_pct}
                 maxAdults={property.max_adults}
                 absorbInstallmentsCost={property.absorb_installments_cost}
-                acceptsUsdt={property.accepts_usdt}
+                acceptsUsdt={cryptoEnabled && property.accepts_usdt}
                 microCanonPct={microCanonPct}
                 consortiumName={consortiumConfig?.consortium_name ?? null}
                 midTermPolicy={midTermPolicy}

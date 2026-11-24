@@ -1,3 +1,11 @@
+/**
+ * BLOCKER REGULATORIO (PSAV CNV — Ley 27.739 / RG CNV 994, 1058, 1172 / UIF Res. 49/2024):
+ * El flujo actual direcciona transferencias ERC-20 de USDT hacia `NEXT_PUBLIC_IBITA_TREASURY_WALLET`
+ * (billetera centralizada / escrow de la plataforma). Para evitar operar como Proveedor de Servicios
+ * de Activos Virtuales (PSAV) no registrado o custodia de fondos de terceros en Argentina, este módulo
+ * permanece deshabilitado por defecto mediante `NEXT_PUBLIC_ENABLE_CRYPTO_PAYMENTS=false` hasta
+ * migrar a autocustodia pura P2P (billetera-a-billetera directa al anfitrión) o completar la inscripción PSAV.
+ */
 import "server-only";
 import Decimal from "decimal.js";
 import {

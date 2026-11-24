@@ -10,13 +10,20 @@ import { AppError, type ActionResult } from "@/lib/errors/app-error";
 import {
   CreatePropertySchema,
   UpdatePropertySchema,
+  SetPropertyRegulatoryStatusSchema,
   validatePhotoUpload,
   ALLOWED_IMAGE_MIME_TYPES,
   type AllowedImageMimeType,
   type CreatePropertyInput,
   type UpdatePropertyInput,
   type PropertyImageItem,
+  type PropertyRegulatoryStatus,
 } from "./validators";
+import {
+  defaultJurisdictionForCorridor,
+  isCryptoPaymentsEnabled,
+  requiresRpattRegistration,
+} from "@/lib/compliance/feature-flags";
 import { DEFAULT_MID_TERM_POLICY } from "./mid-term-policy";
 import {
   PUBLIC_PROPERTY_COLUMNS,
@@ -113,6 +120,26 @@ export async function createPropertyAction(
     };
   }
 
+  const resolvedJurisdiccion =
+    parsed.data.jurisdiccion ??
+    defaultJurisdictionForCorridor(parsed.data.corridor);
+  const cleanRpatt = parsed.data.numero_registro_turistico?.trim() || null;
+
+  if (requiresRpattRegistration(resolvedJurisdiccion) && (!cleanRpatt || cleanRpatt.length < 3)) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message:
+          "Número de inscripción RPATT - Ley 6255 obligatorio para propiedades en CABA (estadías de 1 noche a 3 meses).",
+      },
+    };
+  }
+
+  const effectiveAcceptsUsdt = isCryptoPaymentsEnabled()
+    ? parsed.data.accepts_usdt
+    : false;
+
   const { data: insertedRow, error: insertError } = await supabase
     .from("properties")
     .insert({
@@ -122,6 +149,9 @@ export async function createPropertyAction(
       title: parsed.data.title,
       description: parsed.data.description,
       corridor: parsed.data.corridor,
+      jurisdiccion: resolvedJurisdiccion,
+      numero_registro_turistico: cleanRpatt,
+      estado_regulatorio: "activo",
       address_line: parsed.data.address_line,
       unit_identifier: parsed.data.unit_identifier,
       max_adults: parsed.data.max_adults,
@@ -129,7 +159,7 @@ export async function createPropertyAction(
       nightly_rate: parsed.data.nightly_rate,
       monthly_discount_pct: parsed.data.monthly_discount_pct,
       absorb_installments_cost: parsed.data.absorb_installments_cost,
-      accepts_usdt: parsed.data.accepts_usdt,
+      accepts_usdt: effectiveAcceptsUsdt,
       wifi_speed_mbps: parsed.data.wifi_speed_mbps,
       images: parsed.data.images,
       access_code_ciphertext: encryptedPin.ciphertext,
@@ -205,11 +235,37 @@ export async function updatePropertyAction(
     };
   }
 
-  const { id, accessCodePlain, midTermPolicy, ...restFields } = parsed.data;
+  const {
+    id,
+    accessCodePlain,
+    midTermPolicy,
+    estado_regulatorio: _ignoredRegStatus,
+    ...restFields
+  } = parsed.data;
   const updatePayload: Record<string, unknown> = {
     ...restFields,
     updated_at: new Date().toISOString(),
   };
+
+  if (
+    updatePayload.jurisdiccion !== undefined &&
+    requiresRpattRegistration(String(updatePayload.jurisdiccion))
+  ) {
+    const regNum =
+      typeof updatePayload.numero_registro_turistico === "string"
+        ? updatePayload.numero_registro_turistico.trim()
+        : "";
+    if (updatePayload.numero_registro_turistico !== undefined && regNum.length < 3) {
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "Número de inscripción RPATT - Ley 6255 obligatorio para propiedades en CABA.",
+        },
+      };
+    }
+  }
 
   if (midTermPolicy !== undefined) {
     updatePayload.mid_term_policy = midTermPolicy;
@@ -438,6 +494,91 @@ export async function uploadPropertyPhotoAction(
       height: validatedMeta.height,
       mimeType: validatedMeta.mimeType,
       sizeBytes: validatedMeta.sizeBytes,
+    },
+  };
+}
+
+/**
+ * Acción administrativa (SUPERADMIN) para suspender o reactivar una publicación por
+ * requerimiento oficial del Ente de Turismo (ej. Ley 6255 CABA / RPATT).
+ */
+export async function setPropertyRegulatoryStatusAction(rawInput: {
+  propertyId: string;
+  estadoRegulatorio: PropertyRegulatoryStatus;
+  reason?: string;
+}): Promise<ActionResult<{ propertyId: string; estadoRegulatorio: PropertyRegulatoryStatus }>> {
+  const parsed = SetPropertyRegulatoryStatusSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: parsed.error.issues[0]?.message ?? "Datos regulatorios inválidos.",
+      },
+    };
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+  if (authError || !user) {
+    return {
+      ok: false,
+      error: { code: "UNAUTHORIZED", message: "Sesión no iniciada." },
+    };
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profile?.role !== "SUPERADMIN") {
+    return {
+      ok: false,
+      error: {
+        code: "FORBIDDEN",
+        message: "Solo un administrador regulatorio (SUPERADMIN) puede suspender publicaciones.",
+      },
+    };
+  }
+
+  const adminClient = createSupabaseAdminClient();
+  const isSuspended = parsed.data.estadoRegulatorio === "suspendido_autoridad";
+  const { data: updated, error: updateError } = await adminClient
+    .from("properties")
+    .update({
+      estado_regulatorio: parsed.data.estadoRegulatorio,
+      is_published: isSuspended ? false : undefined,
+      regulatory_suspended_reason: isSuspended ? (parsed.data.reason?.trim() || "Requerimiento de autoridad competente") : null,
+      regulatory_suspended_at: isSuspended ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.data.propertyId)
+    .select("id, slug, estado_regulatorio")
+    .single();
+
+  if (updateError || !updated) {
+    return {
+      ok: false,
+      error: {
+        code: "INTERNAL_ERROR",
+        message: updateError?.message ?? "No se pudo actualizar el estado regulatorio.",
+      },
+    };
+  }
+
+  revalidatePath("/dashboard/propiedades");
+  revalidatePath(`/p/${updated.slug}`);
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    data: {
+      propertyId: updated.id,
+      estadoRegulatorio: updated.estado_regulatorio as PropertyRegulatoryStatus,
     },
   };
 }

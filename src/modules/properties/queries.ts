@@ -6,8 +6,13 @@ import {
   type PropertyCorridor,
   type PropertyCurrency,
   type PropertyImageItem,
+  type PropertyRegulatoryStatus,
   PropertyImageSchema,
 } from "./validators";
+import {
+  defaultJurisdictionForCorridor,
+  type ArgentineJurisdiction,
+} from "@/lib/compliance/feature-flags";
 import { normalizeMidTermPolicy, type MidTermPolicy } from "./mid-term-policy";
 import {
   isBookingHoldExpired,
@@ -39,7 +44,7 @@ async function getPublicSupabaseClient() {
  * cumpliendo con AC-1 / AC-2 (AD-5, NFR-4: Zero-Trust Consorcial).
  */
 export const PUBLIC_PROPERTY_COLUMNS =
-  "id, host_id, slug, title, description, corridor, address_line, unit_identifier, max_adults, base_currency, nightly_rate, monthly_discount_pct, absorb_installments_cost, accepts_usdt, wifi_speed_mbps, images, is_published, mid_term_policy, created_at, updated_at" as const;
+  "id, host_id, slug, title, description, corridor, jurisdiccion, numero_registro_turistico, estado_regulatorio, address_line, unit_identifier, max_adults, base_currency, nightly_rate, monthly_discount_pct, absorb_installments_cost, accepts_usdt, wifi_speed_mbps, images, is_published, mid_term_policy, created_at, updated_at" as const;
 
 /**
  * Columnas públicas de `public.consortium_configs` para mostrar la insignia
@@ -101,6 +106,9 @@ export interface SafePropertyRecord {
   title: string;
   description: string;
   corridor: PropertyCorridor;
+  jurisdiccion: ArgentineJurisdiction;
+  numero_registro_turistico: string | null;
+  estado_regulatorio: PropertyRegulatoryStatus;
   address_line: string;
   unit_identifier: string;
   max_adults: number;
@@ -242,6 +250,16 @@ export function sanitizePublicPropertyRow(
     title,
     description: String(clone.description ?? ""),
     corridor: (clone.corridor as PropertyCorridor) ?? "CABA",
+    jurisdiccion:
+      (clone.jurisdiccion as ArgentineJurisdiction) ??
+      defaultJurisdictionForCorridor(String(clone.corridor ?? "CABA")),
+    numero_registro_turistico:
+      typeof clone.numero_registro_turistico === "string" &&
+      clone.numero_registro_turistico.trim()
+        ? clone.numero_registro_turistico.trim()
+        : null,
+    estado_regulatorio:
+      (clone.estado_regulatorio as PropertyRegulatoryStatus) ?? "activo",
     address_line: String(clone.address_line ?? ""),
     unit_identifier: String(clone.unit_identifier ?? ""),
     max_adults: Number(clone.max_adults ?? 2),
@@ -283,6 +301,7 @@ export async function getPublicPropertyBySlug(
     .select(PUBLIC_PROPERTY_COLUMNS)
     .eq("slug", cleanSlug)
     .eq("is_published", true)
+    .eq("estado_regulatorio", "activo")
     .maybeSingle();
 
   if (error || !data) {
@@ -456,6 +475,7 @@ export async function listPublicProperties(filters?: {
     .from("properties")
     .select(PUBLIC_PROPERTY_COLUMNS)
     .eq("is_published", true)
+    .eq("estado_regulatorio", "activo")
     .order("created_at", { ascending: false });
 
   if (filters?.corridor) {

@@ -1,8 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { Client } from "pg";
 import { env } from "@/env";
+import {
+  DDJJ_CONSORCIO_VERSION,
+  isCryptoPaymentsEnabled,
+} from "@/lib/compliance/feature-flags";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   HostOnboardingSubmissionSchema,
@@ -92,8 +97,27 @@ export async function completeHostOnboardingAction(
     payoutCbuCvu,
     payoutUsdtWallet,
     payoutSplitArsPct,
+    jurisdiccionPrincipal,
+    numeroRegistroTuristico,
     responseSchedule,
   } = parsed.data;
+
+  const effectiveArsPct = isCryptoPaymentsEnabled() ? payoutSplitArsPct : 100;
+  const effectiveWallet = payoutUsdtWallet?.trim() || null;
+
+  let ddjjIp = "0.0.0.0";
+  try {
+    const reqHeaders = await headers();
+    ddjjIp = (
+      reqHeaders.get("x-forwarded-for")?.split(",")[0] ??
+      reqHeaders.get("x-real-ip") ??
+      "0.0.0.0"
+    )
+      .trim()
+      .slice(0, 120);
+  } catch {
+    ddjjIp = "0.0.0.0";
+  }
 
   const storedResponseSchedule: HostResponseSchedule = {
     days: responseSchedule.days,
@@ -107,6 +131,7 @@ export async function completeHostOnboardingAction(
     storedResponseSchedule
   );
 
+  const nowIso = new Date().toISOString();
   const { error: upsertError } = await supabase.from("profiles").upsert({
     id: user.id,
     email: user.email ?? "",
@@ -115,13 +140,18 @@ export async function completeHostOnboardingAction(
     role: nextRole,
     cuit_cuil: cuitCuil.replace(/\D/g, ""),
     payout_cbu_cvu: payoutCbuCvu.replace(/\s+/g, ""),
-    payout_usdt_wallet: payoutUsdtWallet,
-    payout_split_ars_pct: payoutSplitArsPct,
+    payout_usdt_wallet: effectiveWallet,
+    payout_split_ars_pct: effectiveArsPct,
+    jurisdiccion_principal: jurisdiccionPrincipal,
+    numero_registro_turistico_default: numeroRegistroTuristico.trim() || null,
+    ddjj_consorcio_accepted_at: nowIso,
+    ddjj_consorcio_ip: ddjjIp,
+    ddjj_consorcio_version: DDJJ_CONSORCIO_VERSION,
     response_schedule: storedResponseSchedule,
     host_approval_status: "PENDING_APPROVAL",
     host_approval_reviewed_at: null,
     host_approval_notes: null,
-    updated_at: new Date().toISOString(),
+    updated_at: nowIso,
   });
 
   if (upsertError) {
@@ -163,8 +193,8 @@ export async function completeHostOnboardingAction(
     email: user.email ?? "",
     phoneWhatsapp,
     cuitCuil,
-    payoutSplitArsPct,
-    checksumWallet: payoutUsdtWallet,
+    payoutSplitArsPct: effectiveArsPct,
+    checksumWallet: effectiveWallet ?? "Sin billetera USDT (solo ARS)",
     existingPropertiesCount,
     responseScheduleSummary,
   });
@@ -181,7 +211,7 @@ export async function completeHostOnboardingAction(
       userId: user.id,
       role: nextRole,
       approvalStatus: "PENDING_APPROVAL",
-      checksumWallet: payoutUsdtWallet,
+      checksumWallet: effectiveWallet ?? "100% ARS (CBU/CVU)",
       existingPropertiesCount,
     },
   };

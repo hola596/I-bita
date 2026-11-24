@@ -43,6 +43,13 @@ import {
   HostResponseScheduleEditor,
   type HostResponseScheduleFormValue,
 } from "@/components/host/HostResponseScheduleEditor";
+import {
+  ARGENTINE_JURISDICTIONS,
+  JURISDICTION_LABELS,
+  isCryptoPaymentsEnabled,
+  requiresRpattRegistration,
+  type ArgentineJurisdiction,
+} from "@/lib/compliance/feature-flags";
 
 export interface HostOnboardingInitialUser {
   id: string;
@@ -56,6 +63,9 @@ export interface HostOnboardingInitialProfile {
   payoutCbuCvu?: string;
   payoutUsdtWallet?: string;
   payoutSplitArsPct?: number;
+  jurisdiccionPrincipal?: string;
+  numeroRegistroTuristico?: string;
+  ddjjConsorcioAcceptedAt?: string;
   responseSchedule?: unknown;
   role?: string;
 }
@@ -218,6 +228,8 @@ export function HostOnboardingWizard({
   );
   const [reviewLoading, setReviewLoading] = useState(false);
 
+  const cryptoEnabled = isCryptoPaymentsEnabled();
+
   const [fullName, setFullName] = useState(initialProfile?.fullName ?? "");
   const [phoneWhatsapp, setPhoneWhatsapp] = useState(
     initialProfile?.phoneWhatsapp ?? ""
@@ -225,13 +237,25 @@ export function HostOnboardingWizard({
   const [cuitCuil, setCuitCuil] = useState(
     initialProfile?.cuitCuil ? formatCuitDisplay(initialProfile.cuitCuil) : ""
   );
+  const [jurisdiccionPrincipal, setJurisdiccionPrincipal] =
+    useState<ArgentineJurisdiction>(
+      (ARGENTINE_JURISDICTIONS.includes(
+        initialProfile?.jurisdiccionPrincipal as ArgentineJurisdiction
+      )
+        ? initialProfile?.jurisdiccionPrincipal
+        : "CABA") as ArgentineJurisdiction
+    );
+  const [numeroRegistroTuristico, setNumeroRegistroTuristico] = useState(
+    initialProfile?.numeroRegistroTuristico ?? ""
+  );
+  const [ddjjConsorcioAccepted, setDdjjConsorcioAccepted] = useState(false);
   const [payoutSplitArsPct, setPayoutSplitArsPct] = useState<number>(
-    initialProfile?.payoutSplitArsPct ?? 70
+    cryptoEnabled ? (initialProfile?.payoutSplitArsPct ?? 70) : 100
   );
   const [payoutMode, setPayoutMode] = useState<
     "balanced" | "ars_only" | "custom"
   >(
-    initialProfile?.payoutSplitArsPct === 100
+    !cryptoEnabled || initialProfile?.payoutSplitArsPct === 100
       ? "ars_only"
       : initialProfile?.payoutSplitArsPct === undefined ||
           initialProfile.payoutSplitArsPct === 70
@@ -367,11 +391,18 @@ export function HostOnboardingWizard({
 
   const cuitDigitsCount = cuitCuil.replace(/\D/g, "").length;
   const isCuitValid = isValidArgentineCuit(cuitCuil);
-  const step2Valid = isCuitValid;
+  const isRpattValid =
+    !requiresRpattRegistration(jurisdiccionPrincipal) ||
+    numeroRegistroTuristico.trim().length >= 3;
+  const step2Valid = isCuitValid && isRpattValid;
 
   const cleanCbu = payoutCbuCvu.replace(/\s+/g, "");
   const isCbuValid = isValidCbuOrCvu(cleanCbu);
-  const isWalletValid = isAddress(payoutUsdtWallet.trim(), { strict: false });
+  const needsUsdtWallet = cryptoEnabled || payoutSplitArsPct < 100;
+  const isWalletValid = needsUsdtWallet
+    ? isAddress(payoutUsdtWallet.trim(), { strict: false })
+    : payoutUsdtWallet.trim() === "" ||
+      isAddress(payoutUsdtWallet.trim(), { strict: false });
   const step3Valid = isCbuValid && isWalletValid;
   const isResponseScheduleValid =
     responseScheduleValue.days.length >= 1 &&
@@ -397,7 +428,8 @@ export function HostOnboardingWizard({
       isPhoneValid &&
       step2Valid &&
       step3Valid &&
-      isResponseScheduleValid,
+      isResponseScheduleValid &&
+      ddjjConsorcioAccepted,
   ];
 
   const handleSelectPayoutStrategy = (
@@ -520,8 +552,11 @@ export function HostOnboardingWizard({
       phoneWhatsapp: normalizedPhone,
       cuitCuil: cuitCuil.trim(),
       payoutCbuCvu: cleanCbu,
-      payoutUsdtWallet: payoutUsdtWallet.trim(),
-      payoutSplitArsPct: Number(payoutSplitArsPct),
+      payoutUsdtWallet: cryptoEnabled ? payoutUsdtWallet.trim() : "",
+      payoutSplitArsPct: cryptoEnabled ? Number(payoutSplitArsPct) : 100,
+      jurisdiccionPrincipal,
+      numeroRegistroTuristico: numeroRegistroTuristico.trim(),
+      ddjjConsorcioAccepted: true,
       responseSchedule: {
         days: responseScheduleValue.days,
         startHour: responseScheduleValue.startHour,
@@ -1077,7 +1112,7 @@ export function HostOnboardingWizard({
                 </div>
               )}
 
-              {/* PASO 2: RESPALDO FISCAL (CUIT/CUIL) */}
+              {/* PASO 2: RESPALDO FISCAL (CUIT/CUIL) + JURISDICCIÓN Y RPATT */}
               {currentStepIndex === 2 && (
                 <div className="space-y-4">
                   <div className="space-y-2">
@@ -1124,13 +1159,74 @@ export function HostOnboardingWizard({
                     ) : null}
                   </div>
 
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-3">
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="jurisdiccionPrincipal"
+                        className="block text-xs font-extrabold"
+                      >
+                        Jurisdicción principal de tus unidades *
+                      </label>
+                      <select
+                        id="jurisdiccionPrincipal"
+                        name="jurisdiccionPrincipal"
+                        value={jurisdiccionPrincipal}
+                        onChange={(e) =>
+                          setJurisdiccionPrincipal(
+                            e.target.value as ArgentineJurisdiction
+                          )
+                        }
+                        className="min-h-[46px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-xs sm:text-sm font-semibold focus:border-[var(--brand-primary)] focus:outline-none"
+                      >
+                        {ARGENTINE_JURISDICTIONS.map((jur) => (
+                          <option key={jur} value={jur}>
+                            {JURISDICTION_LABELS[jur]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="numeroRegistroTuristico"
+                        className="block text-xs font-extrabold"
+                      >
+                        {requiresRpattRegistration(jurisdiccionPrincipal)
+                          ? "Número de inscripción RPATT - Ley 6255 *"
+                          : "Número de registro turístico local (si corresponde en tu municipio)"}
+                      </label>
+                      <input
+                        id="numeroRegistroTuristico"
+                        name="numeroRegistroTuristico"
+                        type="text"
+                        required={requiresRpattRegistration(jurisdiccionPrincipal)}
+                        maxLength={80}
+                        value={numeroRegistroTuristico}
+                        onChange={(e) =>
+                          setNumeroRegistroTuristico(e.target.value)
+                        }
+                        placeholder={
+                          requiresRpattRegistration(jurisdiccionPrincipal)
+                            ? "Ej: RL-2026-12345678-GCABA-ENTUR"
+                            : "Opcional según ordenanza local"
+                        }
+                        className="min-h-[46px] w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3.5 text-xs sm:text-sm font-mono font-semibold focus:border-[var(--brand-primary)] focus:outline-none"
+                      />
+                      {requiresRpattRegistration(jurisdiccionPrincipal) && (
+                        <p className="text-[11px] text-[var(--text-secondary)] leading-snug">
+                          Obligatorio en CABA para alquileres temporarios de 1 noche a 3 meses (Ley 6255). Se mostrará en la ficha pública de tus propiedades.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
                   <ProgressiveDisclosure
                     icon="shield"
-                    title="¿Por qué te pedimos el CUIT o CUIL?"
-                    subtitle="Solo lo usamos para tus acuerdos legales; nunca se publica."
+                    title="¿Por qué te pedimos el CUIT y registro turístico?"
+                    subtitle="Los contratos se celebran directamente entre vos y el huésped."
                   >
                     <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
-                      En alquileres de 1 a 6 meses en Argentina, el contrato temporario necesita identificar al dueño con su CUIT o CUIL para que el acuerdo tenga respaldo legal.
+                      I-bita provee software de publicación, calendario y acuerdos digitales, sin actuar como inmobiliaria. Tu CUIT/CUIL identifica al locador en los contratos y el RPATT cumple con la Ley 6255 de CABA.
                     </p>
                   </ProgressiveDisclosure>
                 </div>
@@ -1139,62 +1235,76 @@ export function HostOnboardingWizard({
               {/* PASO 3: CÓMO QUERÉS COBRAR */}
               {currentStepIndex === 3 && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => handleSelectPayoutStrategy("balanced", 70)}
-                      aria-pressed={payoutMode === "balanced"}
-                      className={`rounded-2xl border p-3.5 text-left transition-all cursor-pointer space-y-1 ${
-                        payoutMode === "balanced"
-                          ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] ring-2 ring-[var(--brand-primary)]/20"
-                          : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
-                      }`}
+                  {!cryptoEnabled && (
+                    <div
+                      role="note"
+                      className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs text-[var(--text-primary)] leading-relaxed"
                     >
-                      <span className="block text-[11px] font-extrabold text-[var(--brand-primary)]">
-                        Recomendado
-                      </span>
-                      <p className="text-xs font-black">70% ARS · 30% USDT</p>
-                    </button>
+                      <strong className="font-extrabold">
+                        Cobros activos 100% en Pesos Argentinos (ARS):
+                      </strong>{" "}
+                      la recepción de USDT se encuentra temporalmente pausada por adecuación regulatoria (CNV PSAV · Ley 27.739). Informá tu CBU/CVU bancario o fintech en pesos.
+                    </div>
+                  )}
 
-                    <button
-                      type="button"
-                      onClick={() => handleSelectPayoutStrategy("ars_only", 100)}
-                      aria-pressed={payoutMode === "ars_only"}
-                      className={`rounded-2xl border p-3.5 text-left transition-all cursor-pointer space-y-1 ${
-                        payoutMode === "ars_only"
-                          ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] ring-2 ring-[var(--brand-primary)]/20"
-                          : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
-                      }`}
-                    >
-                      <span className="block text-[11px] font-extrabold text-[var(--text-secondary)]">
-                        Todo en Pesos
-                      </span>
-                      <p className="text-xs font-black">100% ARS</p>
-                    </button>
+                  {cryptoEnabled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectPayoutStrategy("balanced", 70)}
+                        aria-pressed={payoutMode === "balanced"}
+                        className={`rounded-2xl border p-3.5 text-left transition-all cursor-pointer space-y-1 ${
+                          payoutMode === "balanced"
+                            ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] ring-2 ring-[var(--brand-primary)]/20"
+                            : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
+                        }`}
+                      >
+                        <span className="block text-[11px] font-extrabold text-[var(--brand-primary)]">
+                          Recomendado
+                        </span>
+                        <p className="text-xs font-black">70% ARS · 30% USDT</p>
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleSelectPayoutStrategy(
-                          "custom",
-                          payoutSplitArsPct === 100 ? 50 : payoutSplitArsPct
-                        )
-                      }
-                      aria-pressed={payoutMode === "custom"}
-                      className={`rounded-2xl border p-3.5 text-left transition-all cursor-pointer space-y-1 ${
-                        payoutMode === "custom"
-                          ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] ring-2 ring-[var(--brand-primary)]/20"
-                          : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
-                      }`}
-                    >
-                      <span className="block text-[11px] font-extrabold text-[var(--text-secondary)]">
-                        A tu medida
-                      </span>
-                      <p className="text-xs font-black">Elegís el %</p>
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectPayoutStrategy("ars_only", 100)}
+                        aria-pressed={payoutMode === "ars_only"}
+                        className={`rounded-2xl border p-3.5 text-left transition-all cursor-pointer space-y-1 ${
+                          payoutMode === "ars_only"
+                            ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] ring-2 ring-[var(--brand-primary)]/20"
+                            : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
+                        }`}
+                      >
+                        <span className="block text-[11px] font-extrabold text-[var(--text-secondary)]">
+                          Todo en Pesos
+                        </span>
+                        <p className="text-xs font-black">100% ARS</p>
+                      </button>
 
-                  {payoutMode === "custom" && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleSelectPayoutStrategy(
+                            "custom",
+                            payoutSplitArsPct === 100 ? 50 : payoutSplitArsPct
+                          )
+                        }
+                        aria-pressed={payoutMode === "custom"}
+                        className={`rounded-2xl border p-3.5 text-left transition-all cursor-pointer space-y-1 ${
+                          payoutMode === "custom"
+                            ? "border-[var(--brand-primary)] bg-[var(--surface-tint)] ring-2 ring-[var(--brand-primary)]/20"
+                            : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]"
+                        }`}
+                      >
+                        <span className="block text-[11px] font-extrabold text-[var(--text-secondary)]">
+                          A tu medida
+                        </span>
+                        <p className="text-xs font-black">Elegís el %</p>
+                      </button>
+                    </div>
+                  )}
+
+                  {cryptoEnabled && payoutMode === "custom" && (
                     <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 space-y-1.5">
                       <div className="flex justify-between text-xs font-extrabold">
                         <label htmlFor="payoutSplitArsPct">
@@ -1251,28 +1361,30 @@ export function HostOnboardingWizard({
                       />
                     </div>
 
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs font-extrabold">
-                        <label htmlFor="payoutUsdtWallet">
-                          Dirección USDT (Red Polygon) *
-                        </label>
-                        {isWalletValid && (
-                          <span className="text-emerald-700 dark:text-emerald-400">
-                            ✓ Válida
-                          </span>
-                        )}
+                    {cryptoEnabled && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-xs font-extrabold">
+                          <label htmlFor="payoutUsdtWallet">
+                            Dirección USDT (Red Polygon) *
+                          </label>
+                          {isWalletValid && (
+                            <span className="text-emerald-700 dark:text-emerald-400">
+                              ✓ Válida
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          id="payoutUsdtWallet"
+                          name="payoutUsdtWallet"
+                          type="text"
+                          required
+                          value={payoutUsdtWallet}
+                          onChange={(e) => setPayoutUsdtWallet(e.target.value)}
+                          className="min-h-[48px] w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-mono font-semibold"
+                          placeholder="0x223c27263ef7d49491031e6cda3feaf2690dd1f7"
+                        />
                       </div>
-                      <input
-                        id="payoutUsdtWallet"
-                        name="payoutUsdtWallet"
-                        type="text"
-                        required
-                        value={payoutUsdtWallet}
-                        onChange={(e) => setPayoutUsdtWallet(e.target.value)}
-                        className="min-h-[48px] w-full rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-4 text-sm font-mono font-semibold"
-                        placeholder="0x223c27263ef7d49491031e6cda3feaf2690dd1f7"
-                      />
-                    </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1326,11 +1438,15 @@ export function HostOnboardingWizard({
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 text-xs">
                     <div>
                       <span className="font-bold text-[var(--text-secondary)]">
-                        CUIT / CUIL:
+                        CUIT y Jurisdicción:
                       </span>{" "}
                       <strong className="font-mono text-[var(--text-primary)]">
                         {cuitCuil}
-                      </strong>
+                      </strong>{" "}
+                      · {jurisdiccionPrincipal}
+                      {numeroRegistroTuristico.trim()
+                        ? ` · RPATT/Reg: ${numeroRegistroTuristico.trim()}`
+                        : ""}
                     </div>
                     <button
                       type="button"
@@ -1344,10 +1460,13 @@ export function HostOnboardingWizard({
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 text-xs">
                     <div className="min-w-0">
                       <p className="font-extrabold text-[var(--text-primary)]">
-                        Cobros: {payoutSplitArsPct}% ARS · {usdtSplitPct}% USDT
+                        Cobros: {cryptoEnabled ? `${payoutSplitArsPct}% ARS · ${usdtSplitPct}% USDT` : "100% ARS"}
                       </p>
                       <p className="font-mono text-[11px] text-[var(--text-secondary)] truncate">
-                        CBU {cleanCbu} · Wallet {payoutUsdtWallet}
+                        CBU {cleanCbu}
+                        {cryptoEnabled && payoutUsdtWallet
+                          ? ` · Wallet ${payoutUsdtWallet}`
+                          : ""}
                       </p>
                     </div>
                     <button
@@ -1358,6 +1477,31 @@ export function HostOnboardingWizard({
                       Cambiar
                     </button>
                   </div>
+
+                  <label className="flex items-start gap-3 rounded-2xl border-2 border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 text-xs leading-relaxed text-[var(--text-primary)] cursor-pointer select-none">
+                    <input
+                      id="ddjj-consorcio-checkbox"
+                      type="checkbox"
+                      required
+                      checked={ddjjConsorcioAccepted}
+                      onChange={(e) => setDdjjConsorcioAccepted(e.target.checked)}
+                      className="mt-0.5 h-5 w-5 rounded accent-[var(--brand-primary)] shrink-0"
+                    />
+                    <span>
+                      <strong className="block font-extrabold mb-1">
+                        Declaración Jurada Digital (Obligatoria) *
+                      </strong>
+                      Declaro bajo juramento que: (a) el reglamento de copropiedad
+                      del edificio habilita alquileres temporarios o de mediana
+                      estadía; (b) cuento con autorización para el ingreso de
+                      huéspedes en portería; (c) poseo cobertura vigente de seguro
+                      de responsabilidad civil; y (d) entiendo que{" "}
+                      <strong>I-bita</strong> opera exclusivamente como plataforma
+                      tecnológica de software y calendario (no como inmobiliaria ni
+                      corredor inmobiliario), celebrándose la locación directa y
+                      exclusivamente entre Anfitrión y Huésped.
+                    </span>
+                  </label>
 
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 text-xs">
                     <div className="min-w-0">

@@ -29,6 +29,7 @@ import {
   type BookingHostResponseWindowSummary,
 } from "@/lib/host/response-schedule";
 import { computeHoldExpiresAt } from "@/lib/bookings/partial-hold";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
 
 export interface GuestVerificationSlot {
   id: string;
@@ -175,7 +176,7 @@ export async function createBookingRequestAction(
          nightly_rate, monthly_discount_pct, absorb_installments_cost,
          accepts_usdt, is_published, mid_term_policy
        FROM public.properties
-       WHERE id = $1 AND is_published = TRUE
+       WHERE id = $1 AND is_published = TRUE AND estado_regulatorio = 'activo'
        LIMIT 1`,
       [propertyId]
     );
@@ -205,7 +206,19 @@ export async function createBookingRequestAction(
       };
     }
 
-    // 3. Validar soporte de moneda USDT en la propiedad
+    // 3. Validar soporte de moneda USDT y feature flag regulatorio (PSAV CNV - Ley 27.739)
+    if (paymentCurrency === "USDT" && !isCryptoPaymentsEnabled()) {
+      await pgClient.query("ROLLBACK");
+      return {
+        ok: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message:
+            "Los pagos en USDT se encuentran temporalmente deshabilitados por adecuación regulatoria (PSAV CNV - Ley 27.739). Seleccioná Pesos Argentinos (ARS).",
+        },
+      };
+    }
+
     if (paymentCurrency === "USDT" && !property.accepts_usdt) {
       await pgClient.query("ROLLBACK");
       return {

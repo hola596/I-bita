@@ -13,6 +13,7 @@ import { Icon3D } from "@/components/ui/Icon3D";
 import { getBookingHostResponseState } from "@/modules/hosts/response-sla";
 import { HostResponseWindowCard } from "@/components/host/HostResponseWindowCard";
 import { PartialHoldStatusCard } from "@/components/booking/PartialHoldStatusCard";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -107,8 +108,44 @@ export default async function CheckoutPage({
     );
   }
 
-  // Flujo USDT
+  // Flujo USDT (protegido por feature flag PSAV CNV - Ley 27.739)
   if (arsSummary.paymentCurrency === "USDT") {
+    if (!isCryptoPaymentsEnabled()) {
+      return (
+        <div className="mx-auto max-w-xl px-4 py-10 space-y-6">
+          <section className="surface-card p-6 sm:p-8 space-y-4">
+            <span className="inline-flex rounded-full bg-amber-500/15 border border-amber-500/40 px-3 py-1 text-xs font-extrabold text-amber-900 dark:text-amber-300">
+              Adecuación regulatoria CNV · PSAV (Ley 27.739)
+            </span>
+            <h1 className="text-2xl font-extrabold tracking-tight">
+              Pagos en USDT temporalmente pausados
+            </h1>
+            <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              Los cobros en activos virtuales (USDT) se encuentran temporalmente
+              deshabilitados mientras adecuamos el esquema a autocustodia pura o
+              inscripción PSAV ante la CNV. Podés generar una nueva reserva en
+              Pesos Argentinos (ARS) o escribirnos para asistirte con esta
+              operación.
+            </p>
+            <div className="flex flex-wrap gap-3 pt-1">
+              <Link
+                href={`/p/${arsSummary.propertySlug}`}
+                className="btn-primary-3d inline-flex min-h-[44px] items-center justify-center rounded-2xl px-5 text-sm font-extrabold"
+              >
+                Reservar en Pesos (ARS)
+              </Link>
+              <Link
+                href="/contacto"
+                className="btn-secondary-3d inline-flex min-h-[44px] items-center justify-center rounded-2xl px-5 text-sm font-extrabold"
+              >
+                Contactar soporte
+              </Link>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
     const usdtRes = await getUsdtCheckoutSummaryAction(bookingId, token ?? null);
     if (!usdtRes.ok) notFound();
     const usdtSummary = usdtRes.data;

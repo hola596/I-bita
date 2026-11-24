@@ -1,9 +1,15 @@
 import type { MidTermPolicy } from "./mid-term-policy";
 import type { PropertyCurrency } from "./validators";
+import {
+  requiresRpattRegistration,
+  type ArgentineJurisdiction,
+} from "@/lib/compliance/feature-flags";
 
 export type WizardFieldKey =
   | "addressLine"
   | "unitIdentifier"
+  | "jurisdiccion"
+  | "numeroRegistroTuristico"
   | "title"
   | "slug"
   | "description"
@@ -31,6 +37,8 @@ export interface WizardFieldIssue {
 export interface PropertyWizardValidationValues {
   addressLine: string;
   unitIdentifier: string;
+  jurisdiccion: ArgentineJurisdiction;
+  numeroRegistroTuristico: string;
   title: string;
   slug: string;
   description: string;
@@ -117,6 +125,41 @@ export function validatePropertyWizardStep(
         problem: `El identificador tiene ${unit.length} caracteres y supera el máximo de 40.`,
         action:
           "Reducí el identificador de unidad a 40 caracteres o menos antes de continuar.",
+        isOutOfRangeOrMalformed: true,
+      });
+    }
+
+    const reg = values.numeroRegistroTuristico.trim();
+    if (requiresRpattRegistration(values.jurisdiccion)) {
+      if (reg.length === 0) {
+        issues.push({
+          fieldId: "prop-rpatt",
+          fieldKey: "numeroRegistroTuristico",
+          fieldLabel: "Número de inscripción RPATT - Ley 6255",
+          problem:
+            "Las unidades ubicadas en CABA deben informar su número de inscripción en el Registro de Propiedades de Alquileres Temporarios Turísticos (RPATT).",
+          action:
+            "Ingresá tu Número de inscripción RPATT - Ley 6255 (mínimo 3 caracteres) antes de continuar.",
+          isOutOfRangeOrMalformed: false,
+        });
+      } else if (reg.length < 3 || reg.length > 80) {
+        issues.push({
+          fieldId: "prop-rpatt",
+          fieldKey: "numeroRegistroTuristico",
+          fieldLabel: "Número de inscripción RPATT - Ley 6255",
+          problem:
+            "El número de inscripción RPATT debe tener entre 3 y 80 caracteres.",
+          action: "Verificá y corregí el código de inscripción RPATT antes de continuar.",
+          isOutOfRangeOrMalformed: true,
+        });
+      }
+    } else if (reg.length > 80) {
+      issues.push({
+        fieldId: "prop-rpatt",
+        fieldKey: "numeroRegistroTuristico",
+        fieldLabel: "Número de registro turístico",
+        problem: "El número de registro no puede superar los 80 caracteres.",
+        action: "Acortá el código a 80 caracteres o menos antes de continuar.",
         isOutOfRangeOrMalformed: true,
       });
     }

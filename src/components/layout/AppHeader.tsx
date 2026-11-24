@@ -7,6 +7,7 @@ import { LogOut, Menu, Moon, Sun, Type, UserCheck, X } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icon3D } from "@/components/ui/Icon3D";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
 
 interface NavItem {
   href: string;
@@ -236,18 +237,20 @@ export function AppHeader() {
             >
               ARS $
             </button>
-            <button
-              type="button"
-              onClick={() => setCurrency("USDT")}
-              aria-pressed={currency === "USDT"}
-              className={`min-h-[34px] rounded-full px-2 sm:px-3 transition-colors whitespace-nowrap cursor-pointer ${
-                currency === "USDT"
-                  ? "bg-emerald-700 text-white shadow-xs"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              USDT ₮
-            </button>
+            {isCryptoPaymentsEnabled() && (
+              <button
+                type="button"
+                onClick={() => setCurrency("USDT")}
+                aria-pressed={currency === "USDT"}
+                className={`min-h-[34px] rounded-full px-2 sm:px-3 transition-colors whitespace-nowrap cursor-pointer ${
+                  currency === "USDT"
+                    ? "bg-emerald-700 text-white shadow-xs"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                USDT ₮
+              </button>
+            )}
           </div>
 
           <button

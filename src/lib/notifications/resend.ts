@@ -252,3 +252,88 @@ export async function sendNewHostApprovalEmail(host: {
 }): Promise<SendResendEmailResult> {
   return sendResendEmail(buildHostApprovalEmailPayload(host));
 }
+
+export async function sendConsumerRequestNotifications(params: {
+  requestType: "ARREPENTIMIENTO" | "BAJA_SERVICIO";
+  trackingCode: string;
+  email: string;
+  bookingCode?: string | null;
+  reason?: string | null;
+  submittedAtUtc: string;
+}): Promise<{ userNotified: boolean; adminNotified: boolean }> {
+  const isArrepentimiento = params.requestType === "ARREPENTIMIENTO";
+  const typeLabel = isArrepentimiento
+    ? "Solicitud de Botón de Arrepentimiento (Ley 24.240 / Disp. 954/2025)"
+    : "Solicitud de Botón de Baja de Servicio (Disp. 954/2025)";
+
+  const safeTracking = escapeHtml(params.trackingCode);
+  const safeEmail = escapeHtml(params.email);
+  const safeBooking = params.bookingCode
+    ? escapeHtml(params.bookingCode)
+    : "No informado";
+  const safeReason = params.reason
+    ? escapeHtml(params.reason).replace(/\n/g, "<br />")
+    : "Sin detalle adicional";
+
+  const userPayload: SendResendEmailInput = {
+    to: params.email,
+    subject: `Constancia de trámite ${params.trackingCode} · I-bita`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; max-width: 600px; margin: 0 auto; line-height: 1.6;">
+        <h2 style="color: #d90b38; margin-bottom: 8px;">Recibimos tu solicitud</h2>
+        <p style="margin-top: 0; color: #4b5563;">${escapeHtml(typeLabel)}</p>
+        <div style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; margin: 16px 0;">
+          <p style="margin: 0 0 6px;"><strong>Código de gestión / trámite:</strong> ${safeTracking}</p>
+          <p style="margin: 0 0 6px;"><strong>Fecha y hora UTC:</strong> ${escapeHtml(params.submittedAtUtc)}</p>
+          <p style="margin: 0;"><strong>Referencia / Reserva:</strong> ${safeBooking}</p>
+        </div>
+        <p style="font-size: 14px; color: #374151;">
+          Nuestro equipo revisará el trámite y te enviará la confirmación formal dentro de las próximas <strong>24 horas</strong>, evaluando los supuestos de excepción aplicables a alojamientos con fecha determinada conforme la normativa vigente (art. 1116 CCCN y Ley 24.240).
+        </p>
+      </div>
+    `.trim(),
+    text: [
+      `Recibimos tu solicitud en I-bita (${typeLabel})`,
+      `Código de gestión / trámite: ${params.trackingCode}`,
+      `Fecha UTC: ${params.submittedAtUtc}`,
+      `Referencia / Reserva: ${params.bookingCode || "No informado"}`,
+      "",
+      "Confirmación formal dentro de las próximas 24 horas.",
+    ].join("\n"),
+  };
+
+  const adminTo = env.ADMIN_NOTIFICATION_EMAIL ?? DEFAULT_ADMIN_NOTIFICATION_EMAIL;
+  const adminPayload: SendResendEmailInput = {
+    to: adminTo,
+    subject: `[URGENTE 24H] ${isArrepentimiento ? "Arrepentimiento" : "Baja"} ${params.trackingCode}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; max-width: 600px; margin: 0 auto; line-height: 1.6;">
+        <h2 style="color: #d90b38;">Nuevo trámite de Defensa del Consumidor (plazo 24 hs)</h2>
+        <p><strong>Tipo:</strong> ${escapeHtml(typeLabel)}</p>
+        <p><strong>Código:</strong> ${safeTracking}</p>
+        <p><strong>Email solicitante:</strong> ${safeEmail}</p>
+        <p><strong>Reserva / Referencia:</strong> ${safeBooking}</p>
+        <p><strong>Motivo:</strong><br />${safeReason}</p>
+        <p><strong>Timestamp UTC:</strong> ${escapeHtml(params.submittedAtUtc)}</p>
+      </div>
+    `.trim(),
+    text: [
+      `Nuevo trámite: ${typeLabel}`,
+      `Código: ${params.trackingCode}`,
+      `Email: ${params.email}`,
+      `Referencia: ${params.bookingCode || "No informado"}`,
+      `Motivo: ${params.reason || "Sin detalle"}`,
+      `UTC: ${params.submittedAtUtc}`,
+    ].join("\n"),
+  };
+
+  const [userRes, adminRes] = await Promise.all([
+    sendResendEmail(userPayload),
+    sendResendEmail(adminPayload),
+  ]);
+
+  return {
+    userNotified: userRes.ok,
+    adminNotified: adminRes.ok,
+  };
+}

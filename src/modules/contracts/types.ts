@@ -16,6 +16,21 @@ export type AgreementKind = z.infer<typeof AgreementKindSchema>;
 
 export const CONTRACT_STORAGE_BUCKET = "contracts" as const;
 
+export interface ContractAuditLogEntry {
+  id: string;
+  contractId: string;
+  bookingId: string;
+  documentSha256Hash: string;
+  signerUserId: string | null;
+  signerRole: "huesped" | "anfitrion";
+  email: string;
+  signedAtUtc: string;
+  ipAddress: string;
+  userAgent: string;
+  otpVerifiedAt: string | null;
+  otpChannel: string | null;
+}
+
 export interface ContractRecord {
   id: string;
   bookingId: string;
@@ -28,4 +43,5 @@ export interface ContractRecord {
   hostSignedAt: string | null;
   createdAt: string;
   isFullySigned: boolean;
+  auditLogs?: ContractAuditLogEntry[];
 }

@@ -22,6 +22,7 @@ import {
   settleApprovedUsdtPayment,
 } from "./settlement";
 import { isBookingHoldExpired } from "@/lib/bookings/partial-hold";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
 
 export interface ArsCheckoutSummary {
   bookingId: string;
@@ -95,6 +96,7 @@ interface CheckoutBookingRow {
   host_confirmed_at: Date | string | null;
   payment_currency: string;
   total_amount: string;
+  platform_fee_amount: string;
   escrow_deposit_usdt: string;
   is_mid_term: boolean;
   check_in: string;
@@ -127,6 +129,7 @@ async function loadAuthorizedBooking(
             b.hold_expires_at, b.host_confirmed_at,
             b.payment_currency::text AS payment_currency,
             b.total_amount::text AS total_amount,
+            b.platform_fee_amount::text AS platform_fee_amount,
             b.escrow_deposit_usdt::text AS escrow_deposit_usdt,
             b.is_mid_term,
             b.check_in::text AS check_in, b.check_out::text AS check_out,
@@ -282,6 +285,7 @@ export async function createArsCheckoutPreferenceAction(
       checkIn: r.check_in,
       checkOut: r.check_out,
       totalAmountArs: r.total_amount,
+      marketplaceFeeArs: r.platform_fee_amount,
     });
     return { ok: true, data: preference };
   } catch (err) {
@@ -359,6 +363,17 @@ export async function verifyAndSettleUsdtPaymentAction(
   inviteToken?: string | null,
   verificationOptions?: VerifyUsdtOptions
 ): Promise<ActionResult<UsdtSettlementResult>> {
+  if (!isCryptoPaymentsEnabled()) {
+    return {
+      ok: false,
+      error: {
+        code: "FORBIDDEN",
+        message:
+          "Los pagos en USDT se encuentran deshabilitados por adecuación regulatoria (CNV PSAV · Ley 27.739). Utilizá Pesos Argentinos (ARS).",
+      },
+    };
+  }
+
   const idParsed = BookingIdSchema.safeParse(bookingId);
   if (!idParsed.success) {
     return {

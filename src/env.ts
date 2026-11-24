@@ -28,6 +28,10 @@ export const env = createEnv({
     KYC_MIN_LIVENESS_THRESHOLD: z.coerce.number().min(0.1).max(0.99).default(0.85),
     KYC_EVIDENCE_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(48),
     CRON_SECRET: z.string().min(16).optional(),
+    MP_MARKETPLACE_SPLIT_ENABLED: z
+      .enum(["true", "false"])
+      .optional()
+      .default("false"),
   },
   client: {
     NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
@@ -35,6 +39,12 @@ export const env = createEnv({
     NEXT_PUBLIC_APP_URL: z.string().url(),
     NEXT_PUBLIC_SUPPORT_WHATSAPP: z.string().min(8).optional(),
     NEXT_PUBLIC_ENABLE_KYC_MOCK: z.enum(["true", "false"]).optional(),
+    NEXT_PUBLIC_ENABLE_CRYPTO_PAYMENTS: z
+      .enum(["true", "false"])
+      .optional()
+      .default("false"),
+    NEXT_PUBLIC_DATA_FISCAL_URL: z.string().url().optional(),
+    NEXT_PUBLIC_DATA_FISCAL_QR_IMG: z.string().url().optional(),
     NEXT_PUBLIC_MP_PUBLIC_KEY: z
       .string()
       .regex(/^(APP_USR|TEST)-/, "Must start with APP_USR- or TEST-"),
@@ -55,6 +65,7 @@ export const env = createEnv({
     ADMIN_WHATSAPP_ALERT_PHONE: process.env.ADMIN_WHATSAPP_ALERT_PHONE,
     MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN,
     MP_WEBHOOK_SECRET: process.env.MP_WEBHOOK_SECRET,
+    MP_MARKETPLACE_SPLIT_ENABLED: process.env.MP_MARKETPLACE_SPLIT_ENABLED,
     EVM_RPC_URL: process.env.EVM_RPC_URL,
     BIOMETRIC_SERVICE_URL: process.env.BIOMETRIC_SERVICE_URL,
     BIOMETRIC_API_KEY: process.env.BIOMETRIC_API_KEY,
@@ -69,6 +80,10 @@ export const env = createEnv({
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_SUPPORT_WHATSAPP: process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP,
     NEXT_PUBLIC_ENABLE_KYC_MOCK: process.env.NEXT_PUBLIC_ENABLE_KYC_MOCK,
+    NEXT_PUBLIC_ENABLE_CRYPTO_PAYMENTS:
+      process.env.NEXT_PUBLIC_ENABLE_CRYPTO_PAYMENTS,
+    NEXT_PUBLIC_DATA_FISCAL_URL: process.env.NEXT_PUBLIC_DATA_FISCAL_URL,
+    NEXT_PUBLIC_DATA_FISCAL_QR_IMG: process.env.NEXT_PUBLIC_DATA_FISCAL_QR_IMG,
     NEXT_PUBLIC_MP_PUBLIC_KEY: process.env.NEXT_PUBLIC_MP_PUBLIC_KEY,
     NEXT_PUBLIC_USDT_CONTRACT_ADDRESS:
       process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS,

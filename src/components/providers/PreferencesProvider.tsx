@@ -11,6 +11,7 @@ import {
 } from "react";
 import { X } from "lucide-react";
 import { Icon3D, type Icon3DName } from "@/components/ui/Icon3D";
+import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
 
 export type ThemePreference = "light" | "dark";
 export type ReadingSizePreference = "normal" | "comfortable";
@@ -75,7 +76,10 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       document.documentElement.dataset.readingSize = resolvedReading;
 
       const savedCurrency = window.localStorage.getItem(CURRENCY_STORAGE_KEY);
-      if (savedCurrency === "ARS" || savedCurrency === "USDT") {
+      if (
+        savedCurrency === "ARS" ||
+        (savedCurrency === "USDT" && isCryptoPaymentsEnabled())
+      ) {
         setCurrencyState(savedCurrency);
       }
 
@@ -150,20 +154,22 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
   const setCurrency = useCallback(
     (next: CurrencyPreference, announce = true) => {
-      if (currency === next) return;
-      setCurrencyState(next);
+      const resolvedNext: CurrencyPreference =
+        next === "USDT" && !isCryptoPaymentsEnabled() ? "ARS" : next;
+      if (currency === resolvedNext) return;
+      setCurrencyState(resolvedNext);
       try {
-        window.localStorage.setItem(CURRENCY_STORAGE_KEY, next);
+        window.localStorage.setItem(CURRENCY_STORAGE_KEY, resolvedNext);
       } catch {
         // Sin acción
       }
       if (announce) {
         notify(
-          next === "ARS"
+          resolvedNext === "ARS"
             ? "Precios actualizados a Pesos Argentinos (ARS)."
             : "Precios actualizados a dólares digitales (USDT).",
           "success",
-          next === "ARS" ? "card" : "coin"
+          resolvedNext === "ARS" ? "card" : "coin"
         );
       }
     },

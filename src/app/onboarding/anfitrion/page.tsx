@@ -48,7 +48,7 @@ export default async function HostOnboardingPage({
         supabase
           .from("profiles")
           .select(
-            "full_name, phone_whatsapp, cuit_cuil, payout_cbu_cvu, payout_usdt_wallet, payout_split_ars_pct, response_schedule, role, host_approval_status, host_approval_notes"
+            "full_name, phone_whatsapp, cuit_cuil, payout_cbu_cvu, payout_usdt_wallet, payout_split_ars_pct, jurisdiccion_principal, numero_registro_turistico_default, ddjj_consorcio_accepted_at, response_schedule, role, host_approval_status, host_approval_notes"
           )
           .eq("id", user.id)
           .maybeSingle(),
@@ -72,6 +72,11 @@ export default async function HostOnboardingPage({
             typeof profileRow.payout_split_ars_pct === "number"
               ? profileRow.payout_split_ars_pct
               : undefined,
+          jurisdiccionPrincipal: profileRow.jurisdiccion_principal ?? undefined,
+          numeroRegistroTuristico:
+            profileRow.numero_registro_turistico_default ?? undefined,
+          ddjjConsorcioAcceptedAt:
+            profileRow.ddjj_consorcio_accepted_at ?? undefined,
           responseSchedule: profileRow.response_schedule ?? undefined,
           role: profileRow.role ?? undefined,
         };

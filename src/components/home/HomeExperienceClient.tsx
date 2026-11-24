@@ -33,6 +33,11 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
 import type { PublicHomePropertySummary } from "@/app/page";
 import { CORRIDOR_LABELS } from "@/modules/properties/validators";
+import {
+  isCryptoPaymentsEnabled,
+  isDemoOrUnsplashProperty,
+} from "@/lib/compliance/feature-flags";
+import { ComplianceInfoTooltip } from "@/components/ui/ComplianceInfoTooltip";
 
 interface HomeExperienceClientProps {
   shortStayArs: StayPricingBreakdown;
@@ -72,6 +77,8 @@ const FALLBACK_FEATURED_PROPERTY: PublicHomePropertySummary = {
   slug: "loft-luminoso-palermo-soho",
   title: "Loft de Diseño en Palermo Soho · Balcón y Coworking",
   corridor: "CABA",
+  jurisdiccion: "CABA",
+  numeroRegistroTuristico: "RL-DEMO-6255-CABA",
   addressLine: "Gorriti 4800, Palermo Soho",
   unitIdentifier: "Piso 4 Depto B",
   maxAdults: 4,
@@ -79,12 +86,13 @@ const FALLBACK_FEATURED_PROPERTY: PublicHomePropertySummary = {
   baseCurrency: "ARS",
   monthlyDiscountPct: 20,
   wifiSpeedMbps: 300,
-  acceptsUsdt: true,
+  acceptsUsdt: false,
   coverUrl: COLLAGE_CENTER_URL,
   coverAlt: "Loft luminoso en Palermo Soho con balcón y espacio de trabajo",
   imageCount: 5,
   isConsortiumFriendly: true,
   requiresInterview: false,
+  isDemoProperty: true,
 };
 
 const CATEGORY_FILTERS: ReadonlyArray<{ id: CategoryFilterId; label: string }> =
@@ -145,22 +153,30 @@ const TRUST_PILLARS = [
   {
     icon: Home,
     title: "Espacios equipados",
-    description: "Listos para vivir y trabajar",
+    description: "Publicados directo por cada anfitrión",
+    tooltip:
+      "I-bita es una plataforma tecnológica de software y publicación. Las características de la unidad son declaradas por el anfitrión.",
   },
   {
     icon: ShieldCheck,
-    title: "Edificios tranquilos",
-    description: "Ingreso ordenado en portería",
+    title: "Ingreso en portería",
+    description: "Validación DNI previa para edificios adheridos",
+    tooltip:
+      "Emite un pase digital tras validar identidad previa (eKYC) en edificios que adhieren al módulo de consorcio.",
   },
   {
     icon: Wifi,
-    title: "Wi-Fi fibra real",
-    description: "Velocidad verificada por unidad",
+    title: "Conectividad Wi-Fi",
+    description: "Velocidad declarada y acreditada por el anfitrión",
+    tooltip:
+      "Velocidad declarada y acreditada por el anfitrión al momento del alta de la unidad.",
   },
   {
     icon: Coins,
-    title: "Pagá en ARS o USDT",
-    description: "Cuotas sin recargos ocultos",
+    title: "Cobros transparentes",
+    description: "Pesos ARS en cuotas según procesador de pagos",
+    tooltip:
+      "Cuotas sujetas a condiciones, promociones y costos financieros vigentes del procesador de pagos (Mercado Pago).",
   },
 ] as const;
 
@@ -223,6 +239,7 @@ export function HomeExperienceClient({
     notify,
   } = usePreferences();
 
+  const cryptoEnabled = isCryptoPaymentsEnabled();
   const [stayMode, setStayMode] = useState<"short" | "midterm">("midterm");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<CategoryFilterId>("ALL");
@@ -408,9 +425,13 @@ export function HomeExperienceClient({
                 </h1>
 
                 <p className="max-w-xl text-sm sm:text-base text-white/90 leading-relaxed">
-                  Alquilá por unos días o de 1 a 6 meses con precio real en
-                  pesos en cuotas o USDT, ingreso ordenado en portería y
-                  contrato digital.
+                  Plataforma tecnológica para publicar y reservar estadías por
+                  días o de 1 a 6 meses en{" "}
+                  {cryptoEnabled
+                    ? "pesos (en cuotas) o USDT"
+                    : "Pesos Argentinos (ARS)"}
+                  , con ingreso ordenado en portería y contrato digital directo
+                  entre Anfitrión y Huésped.
                 </p>
 
                 {/* Buscador integrado frosted glass (inspirado en referencia móvil + desktop) */}
@@ -590,8 +611,18 @@ export function HomeExperienceClient({
                       <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
                       {featuredProperty.isConsortiumFriendly
                         ? "Edificio amigable"
-                        : "Verificado I-bita"}
+                        : "Anfitrión registrado"}
                     </span>
+                    {(featuredProperty.isDemoProperty ||
+                      isDemoOrUnsplashProperty({
+                        id: featuredProperty.id,
+                        slug: featuredProperty.slug,
+                        coverUrl: featuredProperty.coverUrl,
+                      })) && (
+                      <span className="absolute top-11 left-3 rounded-full bg-amber-400/95 px-2.5 py-0.5 text-[10px] font-black text-slate-950 shadow-xs">
+                        Propiedad de demostración · Imágenes ilustrativas
+                      </span>
+                    )}
 
                     <div className="absolute inset-x-2.5 bottom-2.5 rounded-2xl bg-white/95 backdrop-blur-md p-3 text-slate-900 shadow-lg space-y-1.5">
                       <p className="text-xs font-extrabold truncate">
@@ -654,8 +685,12 @@ export function HomeExperienceClient({
                       <Icon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-extrabold text-[var(--text-primary)] leading-tight">
-                        {pillar.title}
+                      <p className="flex items-center gap-1 text-xs sm:text-sm font-extrabold text-[var(--text-primary)] leading-tight">
+                        <span>{pillar.title}</span>
+                        <ComplianceInfoTooltip
+                          label={`Alcance sobre ${pillar.title}`}
+                          explanation={pillar.tooltip}
+                        />
                       </p>
                       <p className="text-[11px] font-medium text-[var(--text-secondary)] leading-snug">
                         {pillar.description}
@@ -681,7 +716,7 @@ export function HomeExperienceClient({
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
             <div className="space-y-1">
               <span className="text-xs font-extrabold uppercase tracking-wider text-[var(--brand-primary)]">
-                Alojamientos verificados
+                Unidades publicadas por anfitriones
               </span>
               <h2
                 id="featured-listings-heading"
@@ -690,8 +725,7 @@ export function HomeExperienceClient({
                 Los más elegidos ({filteredProperties.length})
               </h2>
               <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
-                Tarifas directas en pesos o USDT sin recargos cambiarios ni
-                comisiones sorpresa.
+                Precios claros en {cryptoEnabled ? "pesos o USDT" : "Pesos Argentinos (ARS)"}. Cuotas sujetas a condiciones del procesador de pagos.
               </p>
             </div>
 
@@ -707,19 +741,21 @@ export function HomeExperienceClient({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => setCurrency(currency === "ARS" ? "USDT" : "ARS")}
-                className="btn-secondary-3d inline-flex min-h-[40px] items-center gap-2 rounded-full px-4 text-xs font-extrabold whitespace-nowrap"
-              >
-                <Coins
-                  className="h-3.5 w-3.5 text-[var(--brand-primary)]"
-                  aria-hidden="true"
-                />
-                <span>
-                  Mostrando en {currency === "ARS" ? "ARS $" : "USDT ₮"}
-                </span>
-              </button>
+              {cryptoEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setCurrency(currency === "ARS" ? "USDT" : "ARS")}
+                  className="btn-secondary-3d inline-flex min-h-[40px] items-center gap-2 rounded-full px-4 text-xs font-extrabold whitespace-nowrap"
+                >
+                  <Coins
+                    className="h-3.5 w-3.5 text-[var(--brand-primary)]"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    Mostrando en {currency === "ARS" ? "ARS $" : "USDT ₮"}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -824,6 +860,16 @@ export function HomeExperienceClient({
                             Entrevista 1–6m
                           </span>
                         )}
+                        {(prop.isDemoProperty ||
+                          isDemoOrUnsplashProperty({
+                            id: prop.id,
+                            slug: prop.slug,
+                            coverUrl: prop.coverUrl,
+                          })) && (
+                          <span className="inline-flex items-center rounded-full bg-amber-400/95 px-2.5 py-1 text-[10px] font-black text-slate-950 shadow-xs">
+                            Propiedad de demostración · Imágenes ilustrativas
+                          </span>
+                        )}
                       </div>
 
                       <button
@@ -886,7 +932,7 @@ export function HomeExperienceClient({
                           </span>
                           <span className="inline-flex items-center gap-1">
                             <Wifi className="h-3.5 w-3.5" aria-hidden="true" />
-                            {prop.wifiSpeedMbps ?? 300} Mbps
+                            {prop.wifiSpeedMbps ?? 300} Mbps (decl.)
                           </span>
                           <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
                             <CalendarDays
@@ -897,7 +943,7 @@ export function HomeExperienceClient({
                           </span>
                           <span className="inline-flex items-center gap-1">
                             <Coins className="h-3.5 w-3.5" aria-hidden="true" />
-                            {prop.acceptsUsdt ? "ARS · USDT" : "ARS $"}
+                            {cryptoEnabled && prop.acceptsUsdt ? "ARS · USDT" : "ARS $"}
                           </span>
                         </div>
                       </div>
@@ -1164,11 +1210,18 @@ export function HomeExperienceClient({
                 <button
                   type="button"
                   onClick={() =>
-                    setCurrency(currency === "ARS" ? "USDT" : "ARS")
+                    setCurrency(
+                      cryptoEnabled && currency === "ARS" ? "USDT" : "ARS"
+                    )
                   }
-                  className="btn-secondary-3d inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-extrabold whitespace-nowrap"
+                  disabled={!cryptoEnabled}
+                  className="btn-secondary-3d inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-extrabold whitespace-nowrap disabled:opacity-60"
                 >
-                  <span>Ver en {currency === "ARS" ? "USDT" : "Pesos"}</span>
+                  <span>
+                    {cryptoEnabled
+                      ? `Ver en ${currency === "ARS" ? "USDT" : "Pesos"}`
+                      : "Moneda: ARS $"}
+                  </span>
                 </button>
               </div>
             </div>
@@ -1289,12 +1342,13 @@ export function HomeExperienceClient({
                   <div className="surface-card p-5 space-y-2">
                     <Icon3D name="card" size="md" />
                     <h3 className="text-base font-extrabold">
-                      Pagos sin recargos ocultos
+                      Pagos y financiación transparentes
                     </h3>
                     <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
-                      Abonás en pesos argentinos (hasta 6 cuotas) o en USDT. El
-                      precio que ves antes de confirmar es exactamente lo que
-                      pagás.
+                      Abonás en Pesos Argentinos{" "}
+                      {cryptoEnabled ? "o en USDT " : ""}mediante procesadores
+                      habilitados. Cuotas sujetas a condiciones del procesador de
+                      pagos (Mercado Pago) informadas antes de confirmar.
                     </p>
                   </div>
 
@@ -1415,7 +1469,7 @@ export function HomeExperienceClient({
                       className="h-4 w-4 text-emerald-600 shrink-0"
                       aria-hidden="true"
                     />
-                    <span>Cobros en ARS o USDT</span>
+                    <span>{cryptoEnabled ? "Cobros en ARS o USDT" : "Cobros en Pesos (ARS)"}</span>
                   </li>
                   <li className="flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
                     <CheckCircle2

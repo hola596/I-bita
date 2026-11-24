@@ -154,9 +154,10 @@ export function ArsCheckoutCard({
                 Podés pagar con QR, MODO, dinero en cuenta o tarjeta en hasta{" "}
                 <strong className="text-[var(--text-primary)]">
                   {maxInstallments} cuotas
-                </strong>
-                . En el siguiente paso vas a confirmar la operación en Mercado
-                Pago.
+                </strong>{" "}
+                (sujetas a condiciones y costos del procesador de pagos Mercado
+                Pago). La locación se celebra directamente entre Anfitrión y
+                Huésped; I-bita provee la plataforma tecnológica.
               </p>
 
               <button

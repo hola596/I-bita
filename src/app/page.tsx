@@ -1,6 +1,10 @@
 import { calculateStayPricing } from "@/lib/math/money";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { listPublicProperties } from "@/modules/properties/queries";
+import {
+  isCryptoPaymentsEnabled,
+  isDemoOrUnsplashProperty,
+} from "@/lib/compliance/feature-flags";
 import { HomeExperienceClient } from "@/components/home/HomeExperienceClient";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +14,8 @@ export interface PublicHomePropertySummary {
   slug: string;
   title: string;
   corridor: string;
+  jurisdiccion: string;
+  numeroRegistroTuristico: string | null;
   addressLine: string;
   unitIdentifier: string;
   maxAdults: number;
@@ -23,6 +29,7 @@ export interface PublicHomePropertySummary {
   imageCount: number;
   isConsortiumFriendly: boolean;
   requiresInterview: boolean;
+  isDemoProperty: boolean;
 }
 
 const DEFAULT_HOME_COVER_URL =
@@ -89,29 +96,41 @@ export default async function HomePage() {
     userFirstName = null;
   }
 
+  const cryptoEnabled = isCryptoPaymentsEnabled();
   let availableProperties: PublicHomePropertySummary[] = [];
   try {
     const publicProps = await listPublicProperties();
-    availableProperties = publicProps.slice(0, 12).map((p) => ({
-      id: p.id,
-      slug: p.slug,
-      title: p.title,
-      corridor: p.corridor,
-      addressLine: p.address_line,
-      unitIdentifier: p.unit_identifier,
-      maxAdults: p.max_adults,
-      nightlyRate: p.nightly_rate,
-      baseCurrency: p.base_currency,
-      monthlyDiscountPct: p.monthly_discount_pct,
-      wifiSpeedMbps: p.wifi_speed_mbps,
-      acceptsUsdt: p.accepts_usdt,
-      coverUrl: p.images[0]?.url ?? DEFAULT_HOME_COVER_URL,
-      coverAlt: p.images[0]?.alt ?? p.title,
-      imageCount: Math.max(1, p.images.length),
-      isConsortiumFriendly: Boolean(p.consortium_config?.active),
-      requiresInterview:
-        p.mid_term_policy?.approvalMode === "HOST_APPROVAL_INTERVIEW",
-    }));
+    availableProperties = publicProps.slice(0, 12).map((p) => {
+      const coverUrl = p.images[0]?.url ?? DEFAULT_HOME_COVER_URL;
+      return {
+        id: p.id,
+        slug: p.slug,
+        title: p.title,
+        corridor: p.corridor,
+        jurisdiccion: p.jurisdiccion,
+        numeroRegistroTuristico: p.numero_registro_turistico,
+        addressLine: p.address_line,
+        unitIdentifier: p.unit_identifier,
+        maxAdults: p.max_adults,
+        nightlyRate: p.nightly_rate,
+        baseCurrency: p.base_currency,
+        monthlyDiscountPct: p.monthly_discount_pct,
+        wifiSpeedMbps: p.wifi_speed_mbps,
+        acceptsUsdt: cryptoEnabled && p.accepts_usdt,
+        coverUrl,
+        coverAlt: p.images[0]?.alt ?? p.title,
+        imageCount: Math.max(1, p.images.length),
+        isConsortiumFriendly: Boolean(p.consortium_config?.active),
+        requiresInterview:
+          p.mid_term_policy?.approvalMode === "HOST_APPROVAL_INTERVIEW",
+        isDemoProperty: isDemoOrUnsplashProperty({
+          id: p.id,
+          slug: p.slug,
+          images: p.images,
+          coverUrl,
+        }),
+      };
+    });
   } catch {
     availableProperties = [];
   }
