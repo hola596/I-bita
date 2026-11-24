@@ -10,6 +10,7 @@ import {
   isCryptoPaymentsEnabled,
   requiresRpattRegistration,
 } from "@/lib/compliance/feature-flags";
+import { HostCalendarSyncPreferencesSchema } from "@/modules/ical/validators";
 
 /**
  * Valida el dígito verificador Módulo 11 de un CUIT/CUIL argentino (11 dígitos).
@@ -123,6 +124,7 @@ export const HostOnboardingSchema = z.object({
     }),
   }),
   responseSchedule: HostResponseScheduleSchema.optional(),
+  calendarSyncPreferences: HostCalendarSyncPreferencesSchema.optional(),
 });
 
 export const HostOnboardingSubmissionSchema = HostOnboardingSchema.extend({

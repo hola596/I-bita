@@ -3,6 +3,7 @@ import dns from "node:dns/promises";
 import ipaddr from "ipaddr.js";
 import ssrfReqFilter from "ssrf-req-filter";
 import { AppError } from "@/lib/errors/app-error";
+import { normalizeExternalIcalUrlInput } from "@/lib/ical/platform-guides";
 
 export type DnsLookupRecord = {
   address: string;
@@ -195,9 +196,11 @@ export async function assertSafeExternalUrl(
     );
   }
 
+  const { normalizedUrl } = normalizeExternalIcalUrlInput(rawUrl);
+
   let parsedUrl: URL;
   try {
-    parsedUrl = new URL(rawUrl.trim());
+    parsedUrl = new URL(normalizedUrl);
   } catch {
     throw new AppError(
       "SSRF_BLOCKED_ERROR",

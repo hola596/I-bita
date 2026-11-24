@@ -44,6 +44,14 @@ import {
   type HostResponseScheduleFormValue,
 } from "@/components/host/HostResponseScheduleEditor";
 import {
+  HostCalendarSyncStep,
+  hasBlockingIcalUrlErrors,
+} from "@/components/onboarding/HostCalendarSyncStep";
+import {
+  normalizeHostCalendarSyncPreferences,
+  type HostCalendarSyncPreferences,
+} from "@/lib/ical/platform-guides";
+import {
   ARGENTINE_JURISDICTIONS,
   JURISDICTION_LABELS,
   isCryptoPaymentsEnabled,
@@ -67,6 +75,7 @@ export interface HostOnboardingInitialProfile {
   numeroRegistroTuristico?: string;
   ddjjConsorcioAcceptedAt?: string;
   responseSchedule?: unknown;
+  calendarSyncPreferences?: unknown;
   role?: string;
 }
 
@@ -131,6 +140,14 @@ const ONBOARDING_STEPS: ReadonlyArray<StepDefinition> = [
     icon: "chat",
   },
   {
+    id: "calendar",
+    shortTitle: "Calendarios (Opcional)",
+    title: "¿Querés sincronizar tu calendario con otras apps?",
+    subtitle:
+      "Paso opcional: si ya publicás en Airbnb, Booking o Google Calendar, podés dejar todo preparado ahora para evitar dobles reservas.",
+    icon: "compass",
+  },
+  {
     id: "review",
     shortTitle: "Revisar y enviar",
     title: "Todo listo para enviar tu perfil",
@@ -170,9 +187,14 @@ const HOST_ONBOARDING_STEP_IMAGES: ReadonlyArray<{
     badge: "Paso 5 · Ventana obligatoria de respuesta",
   },
   {
+    url: "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80&fm=webp",
+    alt: "Sincronización de calendario con Airbnb, Booking y Google Calendar",
+    badge: "Paso 6 · Sincronización iCal opcional",
+  },
+  {
     url: "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=1200&q=80&fm=webp",
     alt: "Detalles de categoría en alojamiento urbano",
-    badge: "Paso 6 · Capa de aprobación de anfitriones",
+    badge: "Paso 7 · Capa de aprobación de anfitriones",
   },
 ];
 
@@ -282,6 +304,12 @@ export function HostOnboardingWizard({
           initialNormalizedSchedule.schedule.confirmedAt
       ),
     });
+  const [calendarSyncPreferences, setCalendarSyncPreferences] =
+    useState<HostCalendarSyncPreferences>(() =>
+      normalizeHostCalendarSyncPreferences(
+        initialProfile?.calendarSyncPreferences
+      )
+    );
 
   const [inlineAuthMode, setInlineAuthMode] = useState<"signup" | "signin">(
     "signup"
@@ -310,6 +338,7 @@ export function HostOnboardingWizard({
           endHour?: number;
           maxResponseHours?: MaxResponseHours;
         };
+        calendarSyncPreferences?: unknown;
       }>;
       if (!initialProfile?.fullName && parsed.fullName) {
         setFullName(parsed.fullName);
@@ -347,6 +376,14 @@ export function HostOnboardingWizard({
           }));
         }
       }
+      if (
+        !initialProfile?.calendarSyncPreferences &&
+        parsed.calendarSyncPreferences
+      ) {
+        setCalendarSyncPreferences(
+          normalizeHostCalendarSyncPreferences(parsed.calendarSyncPreferences)
+        );
+      }
     } catch {
       // Ignorar errores de sessionStorage
     }
@@ -367,6 +404,7 @@ export function HostOnboardingWizard({
             endHour: responseScheduleValue.endHour,
             maxResponseHours: responseScheduleValue.maxResponseHours,
           },
+          calendarSyncPreferences,
         })
       );
     } catch {
@@ -381,6 +419,7 @@ export function HostOnboardingWizard({
     responseScheduleValue.startHour,
     responseScheduleValue.endHour,
     responseScheduleValue.maxResponseHours,
+    calendarSyncPreferences,
   ]);
 
   const normalizedPhone = normalizeWhatsapp(phoneWhatsapp);
@@ -418,17 +457,21 @@ export function HostOnboardingWizard({
     confirmedAt: null,
   });
 
+  const isCalendarStepValid = !hasBlockingIcalUrlErrors(calendarSyncPreferences);
+
   const stepValidFlags = [
     isFullNameValid,
     isPhoneValid,
     step2Valid,
     step3Valid,
     isResponseScheduleValid,
+    isCalendarStepValid,
     isFullNameValid &&
       isPhoneValid &&
       step2Valid &&
       step3Valid &&
       isResponseScheduleValid &&
+      isCalendarStepValid &&
       ddjjConsorcioAccepted,
   ];
 
@@ -480,7 +523,18 @@ export function HostOnboardingWizard({
     }
     if (completedStepIndex === 4 && isResponseScheduleValid) {
       notify(
-        "¡Horario de respuesta confirmado! Revisá tu resumen antes de enviarlo.",
+        "¡Horario de respuesta confirmado! Opcionalmente configurá tus calendarios.",
+        "success",
+        "check"
+      );
+      nextStep();
+      return;
+    }
+    if (completedStepIndex === 5 && isCalendarStepValid) {
+      notify(
+        calendarSyncPreferences.mode === "external_sync"
+          ? "Preferencias de calendario guardadas. Revisá tu resumen antes de enviarlo."
+          : "Calendario configurado en modo I-bita. Revisá tu resumen antes de enviarlo.",
         "success",
         "check"
       );
@@ -564,6 +618,7 @@ export function HostOnboardingWizard({
         maxResponseHours: responseScheduleValue.maxResponseHours,
         confirmedCommitment: true,
       },
+      calendarSyncPreferences,
     });
 
     if (res.ok) {
@@ -1025,6 +1080,17 @@ export function HostOnboardingWizard({
                       {isResponseScheduleValid ? " ✓" : ""}
                     </span>
                   </div>
+                  <div className="border-t border-[var(--border-subtle)] pt-2 text-[11px] flex items-center justify-between gap-2">
+                    <span className="font-bold text-[var(--text-secondary)]">
+                      Calendarios:
+                    </span>
+                    <span className="font-extrabold text-right text-[var(--text-primary)]">
+                      {calendarSyncPreferences.mode === "external_sync" &&
+                      calendarSyncPreferences.selectedSources.length > 0
+                        ? `${calendarSyncPreferences.selectedSources.join(", ")} (${calendarSyncPreferences.feeds.length} link)`
+                        : "Solo I-bita"}
+                    </span>
+                  </div>
                 </div>
               }
               canGoBack={currentStepIndex > 0}
@@ -1398,8 +1464,16 @@ export function HostOnboardingWizard({
                 />
               )}
 
-              {/* PASO 5: REVISAR Y ENVIAR */}
+              {/* PASO 5: SINCRONIZACIÓN DE CALENDARIOS (OPCIONAL) */}
               {currentStepIndex === 5 && (
+                <HostCalendarSyncStep
+                  value={calendarSyncPreferences}
+                  onChange={setCalendarSyncPreferences}
+                />
+              )}
+
+              {/* PASO 6: REVISAR Y ENVIAR */}
+              {currentStepIndex === 6 && (
                 <div className="space-y-3">
                   <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 text-xs">
                     <div>
@@ -1515,6 +1589,33 @@ export function HostOnboardingWizard({
                     <button
                       type="button"
                       onClick={() => goTo(4)}
+                      className="font-extrabold text-[var(--brand-primary)] underline shrink-0 cursor-pointer"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3.5 flex items-center justify-between gap-2 text-xs">
+                    <div className="min-w-0">
+                      <p className="font-extrabold text-[var(--text-primary)]">
+                        Calendarios (Opcional)
+                      </p>
+                      <p className="text-[11px] text-[var(--text-secondary)]">
+                        {calendarSyncPreferences.mode === "external_sync" &&
+                        calendarSyncPreferences.selectedSources.length > 0
+                          ? `${calendarSyncPreferences.selectedSources.join(", ")} · ${
+                              calendarSyncPreferences.feeds.length
+                            } ${
+                              calendarSyncPreferences.feeds.length === 1
+                                ? "enlace precargado"
+                                : "enlaces precargados"
+                            }`
+                          : "Solo calendario interno de I-bita por ahora"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => goTo(5)}
                       className="font-extrabold text-[var(--brand-primary)] underline shrink-0 cursor-pointer"
                     >
                       Cambiar

@@ -48,7 +48,7 @@ export default async function HostOnboardingPage({
         supabase
           .from("profiles")
           .select(
-            "full_name, phone_whatsapp, cuit_cuil, payout_cbu_cvu, payout_usdt_wallet, payout_split_ars_pct, jurisdiccion_principal, numero_registro_turistico_default, ddjj_consorcio_accepted_at, response_schedule, role, host_approval_status, host_approval_notes"
+            "full_name, phone_whatsapp, cuit_cuil, payout_cbu_cvu, payout_usdt_wallet, payout_split_ars_pct, jurisdiccion_principal, numero_registro_turistico_default, ddjj_consorcio_accepted_at, response_schedule, calendar_sync_preferences, role, host_approval_status, host_approval_notes"
           )
           .eq("id", user.id)
           .maybeSingle(),
@@ -78,6 +78,8 @@ export default async function HostOnboardingPage({
           ddjjConsorcioAcceptedAt:
             profileRow.ddjj_consorcio_accepted_at ?? undefined,
           responseSchedule: profileRow.response_schedule ?? undefined,
+          calendarSyncPreferences:
+            profileRow.calendar_sync_preferences ?? undefined,
           role: profileRow.role ?? undefined,
         };
         initialApprovalStatus = (profileRow.host_approval_status ??

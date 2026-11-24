@@ -7,19 +7,23 @@ export const runtime = "nodejs";
 
 /**
  * Endpoint público RFC 5545 (`GET /api/ical/[propertyId].ics` o `GET /api/ical/[propertyId]`).
- * Exporta todas las reservas y bloqueos activos (`status NOT IN ('CANCELLED', 'EXPIRED')`)
- * de la Unidad Funcional publicada en zona horaria `America/Argentina/Buenos_Aires`
- * sin filtrar PII de huéspedes ni el PIN de cerradura electrónica (`FR-5`, `AD-4`, `AC-3`).
+ * Soporta `?scope=native` (solo reservas/bloqueos propios de I-bita, recomendado para OTAs para evitar eco circular)
+ * o `?scope=all` (por defecto, calendario consolidado para lectores como Google/Apple Calendar).
+ * Emite eventos `VALUE=DATE` sin PII ni credenciales de acceso (`FR-5`, `AD-4`, `AC-3`).
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ propertyId: string }> }
 ): Promise<NextResponse> {
   try {
     const { propertyId: rawPropertyId } = await context.params;
     const cleanPropertyId = rawPropertyId.replace(/\.ics$/i, "").trim();
+    const rawScope = request.nextUrl.searchParams.get("scope");
+    const scope = rawScope === "native" ? "native" : "all";
 
-    const feed = await generatePropertyIcalFeedAction(cleanPropertyId);
+    const feed = await generatePropertyIcalFeedAction(cleanPropertyId, {
+      scope,
+    });
 
     return new NextResponse(feed.icsContent, {
       status: 200,

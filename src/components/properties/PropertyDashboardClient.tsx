@@ -60,6 +60,12 @@ import type {
   HostMidTermApplicationItem,
 } from "@/modules/bookings/host-approval-actions";
 import type { HostEarningsSummary } from "@/lib/math/host-earnings";
+import {
+  listPropertyIcalFeedsAction,
+  syncExternalIcalAction,
+  type IcalFeedRecord,
+} from "@/modules/ical/actions";
+import type { HostCalendarSyncPreferences } from "@/lib/ical/platform-guides";
 import { HostEarningsPanel } from "@/components/host/HostEarningsPanel";
 import { PropertyIcalSyncPanel } from "./PropertyIcalSyncPanel";
 import { ConsortiumConfigPanel } from "./ConsortiumConfigPanel";
@@ -193,6 +199,8 @@ interface PropertyDashboardClientProps {
   todayYmd?: string;
   initialHostEarnings?: HostEarningsSummary;
   payoutSplitArsPct?: number;
+  initialCalendarSyncPreferences?: HostCalendarSyncPreferences;
+  initialIcalFeedsByProperty?: Record<string, IcalFeedRecord[]>;
   authenticatedEmail: string | null;
 }
 
@@ -299,9 +307,14 @@ export function PropertyDashboardClient({
   todayYmd = getArgentinaTodayYmd(),
   initialHostEarnings,
   payoutSplitArsPct = 100,
+  initialCalendarSyncPreferences,
+  initialIcalFeedsByProperty = {},
   authenticatedEmail,
 }: PropertyDashboardClientProps) {
   const { notify } = usePreferences();
+  const [icalFeedsByProperty, setIcalFeedsByProperty] = useState<
+    Record<string, IcalFeedRecord[]>
+  >(initialIcalFeedsByProperty);
   const [expandedCalendarPropIds, setExpandedCalendarPropIds] = useState<
     Record<string, boolean>
   >({});
@@ -682,12 +695,56 @@ export function PropertyDashboardClient({
 
     setHostProperties((prev) => [res.data, ...prev]);
     setPublicProperties((prev) => [res.data, ...prev]);
+
+    const preloadedFeeds =
+      initialCalendarSyncPreferences?.mode === "external_sync"
+        ? initialCalendarSyncPreferences.feeds.filter(
+            (f) => f.feedUrl && f.feedUrl.trim().length >= 8
+          )
+        : [];
+
+    let inheritedSyncSuffix = "";
+    if (preloadedFeeds.length > 0) {
+      let okCount = 0;
+      for (const feedPref of preloadedFeeds) {
+        try {
+          const syncRes = await syncExternalIcalAction({
+            propertyId: res.data.id,
+            feedUrl: feedPref.feedUrl,
+            sourceName: feedPref.sourceName,
+          });
+          if (syncRes.ok) {
+            okCount += 1;
+          }
+        } catch {
+          // Continuar con el resto si un feed falla puntualmente
+        }
+      }
+      const listRes = await listPropertyIcalFeedsAction(res.data.id);
+      if (listRes.ok) {
+        setIcalFeedsByProperty((prev) => ({
+          ...prev,
+          [res.data.id]: listRes.data,
+        }));
+      }
+      inheritedSyncSuffix =
+        okCount > 0
+          ? ` Sincronizamos automáticamente ${okCount} calendario(s) de tu registro. En "Mis propiedades" tenés tu enlace I-bita (.ics) para completar el Paso 2 bidireccional.`
+          : "";
+    }
+
     setFormStatus({
       type: "success",
-      message: `¡Publicaste "${res.data.title}"! Ya podés compartir el enlace directo /p/${res.data.slug}.`,
+      message: `¡Publicaste "${res.data.title}"! Ya podés compartir el enlace directo /p/${res.data.slug}.${inheritedSyncSuffix}`,
       savedSlug: res.data.slug,
     });
-    notify("¡Tu anuncio ya está publicado en I-bita!", "celebration", "trophy");
+    notify(
+      preloadedFeeds.length > 0
+        ? "¡Publicaste tu unidad y heredamos tus calendarios externos!"
+        : "¡Tu anuncio ya está publicado en I-bita!",
+      "celebration",
+      "trophy"
+    );
     resetForm();
     setWizardStep(0);
   }
@@ -1920,6 +1977,17 @@ export function PropertyDashboardClient({
                         <PropertyIcalSyncPanel
                           propertyId={prop.id}
                           propertyTitle={prop.title}
+                          initialFeeds={icalFeedsByProperty[prop.id] ?? []}
+                          preferredSources={
+                            initialCalendarSyncPreferences?.selectedSources ??
+                            []
+                          }
+                          onFeedsChanged={(nextFeeds) =>
+                            setIcalFeedsByProperty((prev) => ({
+                              ...prev,
+                              [prop.id]: nextFeeds,
+                            }))
+                          }
                         />
 
                         <div className="border-t border-[var(--border-subtle)] pt-3 space-y-3">

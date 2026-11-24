@@ -14,6 +14,8 @@ import {
   listHostMidTermApplicationsAction,
 } from "@/modules/bookings/host-approval-actions";
 import { getHostEarningsSummary } from "@/modules/payments/host-earnings";
+import { listHostAllIcalFeedsAction } from "@/modules/ical/actions";
+import { normalizeHostCalendarSyncPreferences } from "@/lib/ical/platform-guides";
 import { PropertyDashboardClient } from "@/components/properties/PropertyDashboardClient";
 import { Icon3D } from "@/components/ui/Icon3D";
 
@@ -73,7 +75,7 @@ export default async function HostPropertiesDashboardPage() {
   const { data: profileRow } = await supabase
     .from("profiles")
     .select(
-      "role, host_approval_status, host_approval_notes, payout_split_ars_pct"
+      "role, host_approval_status, host_approval_notes, payout_split_ars_pct, calendar_sync_preferences"
     )
     .eq("id", user.id)
     .maybeSingle();
@@ -145,6 +147,7 @@ export default async function HostPropertiesDashboardPage() {
     midTermAppsRes,
     hostConfirmationsRes,
     hostEarnings,
+    hostIcalFeedsRes,
   ] = await Promise.all([
     listHostPropertiesAction(),
     listPublicProperties(),
@@ -152,6 +155,7 @@ export default async function HostPropertiesDashboardPage() {
     listHostMidTermApplicationsAction(),
     listHostBookingConfirmationsAction(),
     getHostEarningsSummary(user.id),
+    listHostAllIcalFeedsAction(),
   ]);
 
   const initialHostProperties = hostRes.ok ? hostRes.data : [];
@@ -175,6 +179,12 @@ export default async function HostPropertiesDashboardPage() {
     typeof profileRow?.payout_split_ars_pct === "number"
       ? profileRow.payout_split_ars_pct
       : 100;
+  const initialCalendarSyncPreferences = normalizeHostCalendarSyncPreferences(
+    profileRow?.calendar_sync_preferences
+  );
+  const initialIcalFeedsByProperty = hostIcalFeedsRes.ok
+    ? hostIcalFeedsRes.data
+    : {};
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -231,6 +241,8 @@ export default async function HostPropertiesDashboardPage() {
         todayYmd={todayYmd}
         initialHostEarnings={hostEarnings}
         payoutSplitArsPct={payoutSplitArsPct}
+        initialCalendarSyncPreferences={initialCalendarSyncPreferences}
+        initialIcalFeedsByProperty={initialIcalFeedsByProperty}
         authenticatedEmail={user.email ?? null}
       />
     </div>

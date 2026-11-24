@@ -24,6 +24,7 @@ import {
   formatResponseScheduleSummary,
   type HostResponseSchedule,
 } from "@/lib/host/response-schedule";
+import { normalizeHostCalendarSyncPreferences } from "@/lib/ical/platform-guides";
 
 export type HostApprovalStatus =
   | "NONE"
@@ -100,7 +101,13 @@ export async function completeHostOnboardingAction(
     jurisdiccionPrincipal,
     numeroRegistroTuristico,
     responseSchedule,
+    calendarSyncPreferences,
   } = parsed.data;
+
+  const storedCalendarPrefs = normalizeHostCalendarSyncPreferences({
+    ...calendarSyncPreferences,
+    updatedAt: new Date().toISOString(),
+  });
 
   const effectiveArsPct = isCryptoPaymentsEnabled() ? payoutSplitArsPct : 100;
   const effectiveWallet = payoutUsdtWallet?.trim() || null;
@@ -148,6 +155,7 @@ export async function completeHostOnboardingAction(
     ddjj_consorcio_ip: ddjjIp,
     ddjj_consorcio_version: DDJJ_CONSORCIO_VERSION,
     response_schedule: storedResponseSchedule,
+    calendar_sync_preferences: storedCalendarPrefs,
     host_approval_status: "PENDING_APPROVAL",
     host_approval_reviewed_at: null,
     host_approval_notes: null,
@@ -172,14 +180,19 @@ export async function completeHostOnboardingAction(
     });
     await pg.connect();
     try {
+      const calendarNoticeSuffix =
+        storedCalendarPrefs.mode === "external_sync" &&
+        storedCalendarPrefs.selectedSources.length > 0
+          ? ` Sincronización iCal declarada: ${storedCalendarPrefs.selectedSources.join(", ")} (${storedCalendarPrefs.feeds.length} enlace(s) precargado(s)).`
+          : "";
       await ensureHostApprovalConversationWithPg(pg, {
         profileId: user.id,
         actorUserId: user.id,
         isAdmin: false,
         systemNoticeBody:
           existingPropertiesCount > 0
-            ? `${fullName} actualizó sus datos fiscales/cobro e intervalo de respuesta (${responseScheduleSummary}) y reenvió la solicitud a revisión.`
-            : `${fullName} envió su solicitud inicial de alta como anfitrión con horario de respuesta confirmado (${responseScheduleSummary}).`,
+            ? `${fullName} actualizó sus datos fiscales/cobro e intervalo de respuesta (${responseScheduleSummary}) y reenvió la solicitud a revisión.${calendarNoticeSuffix}`
+            : `${fullName} envió su solicitud inicial de alta como anfitrión con horario de respuesta confirmado (${responseScheduleSummary}).${calendarNoticeSuffix}`,
       });
     } finally {
       await pg.end();
