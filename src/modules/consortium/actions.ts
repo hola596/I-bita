@@ -519,10 +519,13 @@ export interface SanitizedVerificationSlotSummary {
   bookingId: string;
   isPrimaryGuest: boolean;
   inviteToken: string;
-  status: "PENDING" | "VERIFIED" | "REJECTED";
+  status: "PENDING" | "VERIFIED" | "REJECTED" | "MANUAL_REVIEW";
   maskedDocumentNumber: string | null;
   fullNameExtracted: string | null;
   biometricConfidenceScore: number | null;
+  similarityScore?: number | null;
+  livenessScore?: number | null;
+  auditHash?: string | null;
   verifiedAt: string | null;
   checkinPath: string;
 }
@@ -743,7 +746,10 @@ export async function getBookingCheckinStateAction(
       document_number: string | null;
       full_name_extracted: string | null;
       biometric_confidence_score: string | null;
-      status: "PENDING" | "VERIFIED" | "REJECTED";
+      similarity_score: string | null;
+      liveness_score: string | null;
+      audit_hash: string | null;
+      status: "PENDING" | "VERIFIED" | "REJECTED" | "MANUAL_REVIEW";
       verified_at: Date | string | null;
       created_at: Date | string;
     }>(
@@ -755,6 +761,9 @@ export async function getBookingCheckinStateAction(
          document_number,
          full_name_extracted,
          biometric_confidence_score::text AS biometric_confidence_score,
+         similarity_score::text AS similarity_score,
+         liveness_score::text AS liveness_score,
+         audit_hash,
          status::text AS status,
          verified_at,
          created_at
@@ -778,6 +787,11 @@ export async function getBookingCheckinStateAction(
           sRow.biometric_confidence_score !== null
             ? Number(sRow.biometric_confidence_score)
             : null,
+        similarityScore:
+          sRow.similarity_score !== null ? Number(sRow.similarity_score) : null,
+        livenessScore:
+          sRow.liveness_score !== null ? Number(sRow.liveness_score) : null,
+        auditHash: sRow.audit_hash ?? null,
         verifiedAt:
           sRow.verified_at instanceof Date
             ? sRow.verified_at.toISOString()

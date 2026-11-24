@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/kyc-cleanup",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}
