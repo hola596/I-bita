@@ -7,6 +7,7 @@ import { z } from "zod";
 import { env } from "@/env";
 import { AppError, type ActionResult } from "@/lib/errors/app-error";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { sendPushNotificationToUser } from "@/lib/push";
 import {
   SendConversationMessageSchema,
   type ConversationMessageRecord,
@@ -376,6 +377,19 @@ export async function sendConversationMessageAction(
     });
 
     await markConversationReadWithPg(pg, conv.id, user.id);
+
+    const pushTargetUserId =
+      senderRole === "GUEST"
+        ? conv.host_id
+        : conv.guest_or_requester_id;
+    if (pushTargetUserId && pushTargetUserId !== user.id) {
+      void sendPushNotificationToUser(pushTargetUserId, {
+        title: `Nuevo mensaje de ${senderName}`,
+        body: parsed.data.body.slice(0, 120),
+        url: `/mensajes?c=${encodeURIComponent(conv.id)}`,
+        tag: `conv-msg-${conv.id}`,
+      });
+    }
 
     if (conv.booking_id && senderRole === "HOST") {
       await pg.query(

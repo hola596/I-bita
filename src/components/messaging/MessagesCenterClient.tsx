@@ -27,6 +27,7 @@ import {
 import { Icon3D } from "@/components/ui/Icon3D";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
 import { dispatchNotificationsRefresh } from "@/lib/notifications/client-events";
+import { PushNotificationToggle } from "@/components/notifications/PushNotificationToggle";
 
 interface MessagesCenterClientProps {
   currentUserId: string;
@@ -324,6 +325,8 @@ export function MessagesCenterClient({
           </Link>
         </div>
       </header>
+
+      <PushNotificationToggle variant="compact" />
 
       {errorText && (
         <p

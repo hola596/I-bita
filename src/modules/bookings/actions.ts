@@ -30,6 +30,7 @@ import {
 } from "@/lib/host/response-schedule";
 import { computeHoldExpiresAt } from "@/lib/bookings/partial-hold";
 import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
+import { sendPushNotificationToUser } from "@/lib/push";
 
 export interface GuestVerificationSlot {
   id: string;
@@ -630,6 +631,17 @@ export async function createBookingRequestAction(
     });
 
     await pgClient.query("COMMIT");
+
+    if (property.host_id !== effectiveGuestId) {
+      void sendPushNotificationToUser(property.host_id, {
+        title: requiresHostApproval
+          ? "Nueva solicitud de estadía larga"
+          : "Nueva reserva en tu propiedad",
+        body: `${guestDisplayName} solicitó ${property.title} (${checkIn} al ${checkOut}).`,
+        url: "/dashboard/propiedades",
+        tag: `booking-new-${bookingId}`,
+      });
+    }
 
     try {
       revalidatePath(`/p/${property.slug}`);

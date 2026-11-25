@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { env } from "@/env";
@@ -30,6 +30,22 @@ export const metadata: Metadata = {
   alternates: {
     canonical: "/",
   },
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "I-bita",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+  },
   openGraph: {
     type: "website",
     locale: "es_AR",
@@ -39,6 +55,13 @@ export const metadata: Metadata = {
     description:
       "Publicación, calendario e ingreso ordenado en portería para alquileres temporarios en Argentina (1 día a 6 meses). I-bita no actúa como inmobiliaria.",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#d90b38" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1016" },
+  ],
 };
 
 const jsonLdSchema = {

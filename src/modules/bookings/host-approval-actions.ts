@@ -16,6 +16,7 @@ import {
   isBookingHoldExpired,
   isBookingPaid,
 } from "@/lib/bookings/partial-hold";
+import { sendPushNotificationToUser } from "@/lib/push";
 
 export interface HostBookingConfirmationItem {
   bookingId: string;
@@ -271,9 +272,11 @@ export async function reviewMidTermBookingAction(rawInput: {
       id: string;
       status: string;
       host_id: string;
+      guest_id: string | null;
       property_slug: string;
+      property_title: string;
     }>(
-      `SELECT b.id, b.status::text AS status, p.host_id, p.slug AS property_slug
+      `SELECT b.id, b.status::text AS status, p.host_id, b.guest_id, p.slug AS property_slug, p.title AS property_title
        FROM public.bookings b
        INNER JOIN public.properties p ON p.id = b.property_id
        WHERE b.id = $1
@@ -344,6 +347,20 @@ export async function reviewMidTermBookingAction(rawInput: {
     );
 
     const updated = updatedRes.rows[0]!;
+
+    if (existing.guest_id) {
+      const approved = parsed.data.decision === "APPROVE";
+      void sendPushNotificationToUser(existing.guest_id, {
+        title: approved
+          ? "¡Solicitud aprobada para tu estadía!"
+          : "Actualización de tu solicitud",
+        body: approved
+          ? `El anfitrión aprobó tu solicitud en ${existing.property_title}. Ya podés completar el pago.`
+          : `Tu solicitud en ${existing.property_title} fue cancelada por el anfitrión.`,
+        url: approved ? `/checkout/${existing.id}` : `/mensajes?booking=${existing.id}`,
+        tag: `booking-review-${existing.id}`,
+      });
+    }
 
     try {
       revalidatePath("/dashboard/propiedades");
@@ -557,13 +574,14 @@ export async function confirmHostBookingAction(rawInput: {
       hold_expires_at: Date | string | null;
       host_confirmed_at: Date | string | null;
       host_id: string;
+      guest_id: string | null;
       property_slug: string;
       property_title: string;
       check_in: string;
       check_out: string;
     }>(
       `SELECT b.id, b.status::text AS status, b.hold_expires_at, b.host_confirmed_at,
-              p.host_id, p.slug AS property_slug, p.title AS property_title,
+              p.host_id, b.guest_id, p.slug AS property_slug, p.title AS property_title,
               b.check_in::text AS check_in, b.check_out::text AS check_out
        FROM public.bookings b
        INNER JOIN public.properties p ON p.id = b.property_id
@@ -655,6 +673,15 @@ export async function confirmHostBookingAction(rawInput: {
       );
       await pg.query("COMMIT");
 
+      if (existing.guest_id) {
+        void sendPushNotificationToUser(existing.guest_id, {
+          title: "Reserva liberada por el anfitrión",
+          body: `Se liberaron las fechas en ${existing.property_title} (${existing.check_in} al ${existing.check_out}).`,
+          url: `/mensajes?booking=${existing.id}`,
+          tag: `booking-release-${existing.id}`,
+        });
+      }
+
       try {
         revalidatePath("/dashboard/propiedades");
         revalidatePath("/perfil");
@@ -727,6 +754,15 @@ export async function confirmHostBookingAction(rawInput: {
     }
 
     await pg.query("COMMIT");
+
+    if (existing.guest_id) {
+      void sendPushNotificationToUser(existing.guest_id, {
+        title: "¡El anfitrión confirmó tu reserva!",
+        body: `Tu estadía en ${existing.property_title} (${existing.check_in} al ${existing.check_out}) quedó confirmada.`,
+        url: `/checkout/${existing.id}`,
+        tag: `booking-confirm-${existing.id}`,
+      });
+    }
 
     try {
       revalidatePath("/dashboard/propiedades");

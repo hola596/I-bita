@@ -30,6 +30,7 @@ import { HostResponseProfileCard } from "@/components/host/HostResponseProfileCa
 import { Icon3D } from "@/components/ui/Icon3D";
 import { AchievementBanner } from "@/components/ui/AchievementBanner";
 import { NotificationCountBadge } from "@/components/layout/NotificationCountBadge";
+import { PushNotificationToggle } from "@/components/notifications/PushNotificationToggle";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
 import {
   formatHoldRemainingLabel,
@@ -374,6 +375,8 @@ export function ProfileClient({
             description={saveMessage.text ?? "Ya guardamos los cambios."}
           />
         )}
+
+        <PushNotificationToggle variant="card" />
 
         {isApprovedHost && hostEarnings && (
           <HostEarningsPanel

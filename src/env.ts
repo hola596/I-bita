@@ -32,6 +32,14 @@ export const env = createEnv({
       .enum(["true", "false"])
       .optional()
       .default("false"),
+    VAPID_PRIVATE_KEY: z.string().min(20).optional(),
+    VAPID_SUBJECT: z
+      .string()
+      .refine(
+        (v) => v.startsWith("mailto:") || v.startsWith("https://"),
+        "VAPID_SUBJECT must start with mailto: or https://"
+      )
+      .optional(),
   },
   client: {
     NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
@@ -45,6 +53,7 @@ export const env = createEnv({
       .default("false"),
     NEXT_PUBLIC_DATA_FISCAL_URL: z.string().url().optional(),
     NEXT_PUBLIC_DATA_FISCAL_QR_IMG: z.string().url().optional(),
+    NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().min(20).optional(),
     NEXT_PUBLIC_MP_PUBLIC_KEY: z
       .string()
       .regex(/^(APP_USR|TEST)-/, "Must start with APP_USR- or TEST-"),
@@ -75,6 +84,8 @@ export const env = createEnv({
     KYC_MIN_LIVENESS_THRESHOLD: process.env.KYC_MIN_LIVENESS_THRESHOLD,
     KYC_EVIDENCE_TTL_HOURS: process.env.KYC_EVIDENCE_TTL_HOURS,
     CRON_SECRET: process.env.CRON_SECRET,
+    VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+    VAPID_SUBJECT: process.env.VAPID_SUBJECT,
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
@@ -84,6 +95,7 @@ export const env = createEnv({
       process.env.NEXT_PUBLIC_ENABLE_CRYPTO_PAYMENTS,
     NEXT_PUBLIC_DATA_FISCAL_URL: process.env.NEXT_PUBLIC_DATA_FISCAL_URL,
     NEXT_PUBLIC_DATA_FISCAL_QR_IMG: process.env.NEXT_PUBLIC_DATA_FISCAL_QR_IMG,
+    NEXT_PUBLIC_VAPID_PUBLIC_KEY: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
     NEXT_PUBLIC_MP_PUBLIC_KEY: process.env.NEXT_PUBLIC_MP_PUBLIC_KEY,
     NEXT_PUBLIC_USDT_CONTRACT_ADDRESS:
       process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS,
