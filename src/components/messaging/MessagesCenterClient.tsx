@@ -5,7 +5,9 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   ArrowUpRight,
+  KeyRound,
   Loader2,
   MessageSquare,
   RefreshCw,
@@ -278,8 +280,45 @@ export function MessagesCenterClient({
     return null;
   }
 
+  function resolveGuestCheckinAction(conv: ConversationSummary): {
+    href: string;
+    title: string;
+    subtitle: string;
+    ctaLabel: string;
+    tone: "pending" | "ready";
+  } | null {
+    if (!conv.bookingId || conv.hostId === currentUserId) return null;
+    if (conv.bookingStatus === "PAID_PENDING_KYC") {
+      return {
+        href: `/checkin/${conv.bookingId}`,
+        title: "Check-in digital pendiente",
+        subtitle:
+          "Validá tu DNI y selfie para liberar tu código de cerradura y pase de portería.",
+        ctaLabel: "Ir al Check-in ahora",
+        tone: "pending",
+      };
+    }
+    if (
+      conv.bookingStatus === "ALL_ADULTS_VERIFIED" ||
+      conv.bookingStatus === "CHECKED_IN"
+    ) {
+      return {
+        href: `/checkin/${conv.bookingId}`,
+        title: "Tu Check-in y pase de ingreso están listos",
+        subtitle:
+          "Consultá tu clave de puerta, pase QR de portería y acuerdo digital.",
+        ctaLabel: "Abrir Check-in y clave",
+        tone: "ready",
+      };
+    }
+    return null;
+  }
+
   const contextAction = activeConversation
     ? resolveContextAction(activeConversation)
+    : null;
+  const guestCheckinAction = activeConversation
+    ? resolveGuestCheckinAction(activeConversation)
     : null;
 
   return (
@@ -419,12 +458,19 @@ export function MessagesCenterClient({
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${KIND_BADGE_CLASS[conv.kind]}`}
                           >
                             {CONVERSATION_KIND_LABELS[conv.kind]}
                           </span>
+                          {conv.bookingId &&
+                            conv.hostId !== currentUserId &&
+                            conv.bookingStatus === "PAID_PENDING_KYC" && (
+                              <span className="rounded-full bg-amber-500/20 text-amber-950 dark:text-amber-200 border border-amber-500/40 px-2 py-0.5 text-[10px] font-extrabold">
+                                Check-in pendiente
+                              </span>
+                            )}
                           {unread > 0 && (
                             <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--brand-primary)] px-1 text-[10px] font-black text-white">
                               {unread > 9 ? "9+" : unread}
@@ -518,6 +564,44 @@ export function MessagesCenterClient({
                 )}
               </div>
 
+              {guestCheckinAction && (
+                <div
+                  className={`border-b px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    guestCheckinAction.tone === "pending"
+                      ? "bg-[var(--surface-tint)]/80 border-[var(--brand-primary)]/35"
+                      : "bg-[var(--badge-consorcio-bg)]/55 border-emerald-600/35"
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5 min-w-0">
+                    <div
+                      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                        guestCheckinAction.tone === "pending"
+                          ? "bg-[var(--brand-primary)] text-white"
+                          : "bg-emerald-600 text-white"
+                      }`}
+                    >
+                      <KeyRound className="h-4 w-4" aria-hidden="true" />
+                    </div>
+                    <div className="min-w-0 space-y-0.5">
+                      <p className="text-xs sm:text-sm font-extrabold text-[var(--text-primary)]">
+                        {guestCheckinAction.title}
+                      </p>
+                      <p className="text-[11px] sm:text-xs font-medium text-[var(--text-secondary)] leading-snug">
+                        {guestCheckinAction.subtitle}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    href={guestCheckinAction.href}
+                    className="btn-primary-3d inline-flex min-h-[44px] w-full sm:w-auto shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-xs sm:text-sm font-extrabold whitespace-nowrap"
+                  >
+                    <span>{guestCheckinAction.ctaLabel}</span>
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </Link>
+                </div>
+              )}
+
               {/* Lista cronológica */}
               <div className="flex-1 max-h-[430px] overflow-y-auto p-4 sm:p-5 space-y-3 bg-[var(--bg-secondary)]/30">
                 {loadingThread ? (
@@ -593,6 +677,22 @@ export function MessagesCenterClient({
                           <p className="text-xs sm:text-sm leading-relaxed whitespace-pre-line">
                             {msg.body}
                           </p>
+
+                          {!isMine &&
+                            activeConversation.bookingId &&
+                            activeConversation.hostId !== currentUserId &&
+                            /(check-?in|dni|selfie)/i.test(msg.body) && (
+                              <Link
+                                href={`/checkin/${activeConversation.bookingId}`}
+                                className="btn-primary-3d mt-2 inline-flex min-h-[40px] w-full sm:w-auto items-center justify-center gap-1.5 rounded-xl px-4 text-xs font-extrabold"
+                              >
+                                <span>Abrir enlace de Check-in</span>
+                                <ArrowRight
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                />
+                              </Link>
+                            )}
 
                           <p className="text-[10px] opacity-75 text-right">
                             {formatDateTimeAr(msg.createdAt)}

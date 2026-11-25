@@ -8,11 +8,13 @@ import {
   ArrowRight,
   Clock,
   ExternalLink,
+  KeyRound,
   Loader2,
   LogOut,
   MessageSquare,
   Moon,
   Pencil,
+  ScanFace,
   Sun,
   Type,
   X,
@@ -205,6 +207,13 @@ export function ProfileClient({
   const usdtPct = Math.max(0, 100 - arsPct);
   const initials = getInitials(displayName, user.email);
 
+  const primaryCheckinBooking =
+    guestBookings.find((b) => b.status === "PAID_PENDING_KYC") ??
+    guestBookings.find(
+      (b) => b.status === "ALL_ADULTS_VERIFIED" || b.status === "CHECKED_IN"
+    ) ??
+    null;
+
   async function handleSaveBasicProfile(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSaving(true);
@@ -374,6 +383,87 @@ export function ProfileClient({
             title="¡Listo! Tu perfil quedó actualizado"
             description={saveMessage.text ?? "Ya guardamos los cambios."}
           />
+        )}
+
+        {primaryCheckinBooking && (
+          <section
+            aria-labelledby="guest-primary-checkin-heading"
+            className={`surface-card p-5 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-2 ${
+              primaryCheckinBooking.status === "PAID_PENDING_KYC"
+                ? "border-[var(--brand-primary)]/45 bg-[var(--surface-tint)]/45"
+                : "border-emerald-600/40 bg-[var(--badge-consorcio-bg)]/45"
+            }`}
+          >
+            <div className="flex items-start gap-3.5 min-w-0">
+              <Icon3D
+                name={
+                  primaryCheckinBooking.status === "PAID_PENDING_KYC"
+                    ? "face"
+                    : "key"
+                }
+                size="md"
+              />
+              <div className="space-y-1 min-w-0">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-[11px] font-extrabold ${
+                    primaryCheckinBooking.status === "PAID_PENDING_KYC"
+                      ? "bg-amber-500/20 text-amber-950 dark:text-amber-200 border border-amber-500/40"
+                      : "badge-consorcio-friendly"
+                  }`}
+                >
+                  {primaryCheckinBooking.status === "PAID_PENDING_KYC" ? (
+                    <>
+                      <ScanFace className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Paso pendiente para tu ingreso</span>
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Check-in confirmado ✓</span>
+                    </>
+                  )}
+                </span>
+
+                <h2
+                  id="guest-primary-checkin-heading"
+                  className="text-lg sm:text-xl font-extrabold tracking-tight text-[var(--text-primary)]"
+                >
+                  {primaryCheckinBooking.status === "PAID_PENDING_KYC"
+                    ? "Completá tu Check-in digital (DNI y selfie)"
+                    : "Tu código de puerta y pase QR están listos"}
+                </h2>
+
+                <p className="text-xs sm:text-sm font-semibold text-[var(--text-secondary)]">
+                  Estadía del {primaryCheckinBooking.checkIn} al{" "}
+                  {primaryCheckinBooking.checkOut} ·{" "}
+                  {primaryCheckinBooking.nightsCount}{" "}
+                  {primaryCheckinBooking.nightsCount === 1 ? "noche" : "noches"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5 shrink-0">
+              <Link
+                href={`/checkin/${primaryCheckinBooking.id}`}
+                className="btn-primary-3d inline-flex min-h-[48px] items-center justify-center gap-2 rounded-2xl px-5 text-xs sm:text-sm font-extrabold whitespace-nowrap"
+              >
+                <span>
+                  {primaryCheckinBooking.status === "PAID_PENDING_KYC"
+                    ? "Ir al Check-in ahora"
+                    : "Ver mi Check-in y QR"}
+                </span>
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+
+              <Link
+                href={`/mensajes?booking=${primaryCheckinBooking.id}`}
+                className="btn-secondary-3d inline-flex min-h-[48px] items-center justify-center gap-1.5 rounded-2xl px-4 text-xs sm:text-sm font-extrabold whitespace-nowrap"
+              >
+                <MessageSquare className="h-4 w-4" aria-hidden="true" />
+                <span>Abrir Mensajes</span>
+              </Link>
+            </div>
+          </section>
         )}
 
         <PushNotificationToggle variant="card" />
@@ -664,24 +754,30 @@ export function ProfileClient({
                               badgeClass:
                                 "bg-amber-500/15 text-amber-900 dark:text-amber-300 border border-amber-500/40",
                             }
-                          : phase === "PAID_AWAITING_HOST"
+                          : booking.status === "PAID_PENDING_KYC"
                             ? {
-                                label: "Pago OK · Falta anfitrión",
+                                label: "Falta Check-in (DNI y selfie)",
                                 badgeClass:
-                                  "bg-amber-500/15 text-amber-900 dark:text-amber-300 border border-amber-500/40",
+                                  "bg-[var(--badge-ars-bg)] text-[var(--badge-ars-text)] border border-sky-600/30",
                               }
-                            : phase === "CONFIRMED" &&
-                                booking.status !== "CHECKED_IN" &&
-                                booking.status !== "COMPLETED"
+                            : phase === "PAID_AWAITING_HOST"
                               ? {
-                                  label: "Reserva confirmada ✓",
-                                  badgeClass: "badge-consorcio-friendly",
-                                }
-                              : BOOKING_STATUS_LABELS[booking.status] ?? {
-                                  label: booking.status,
+                                  label: "Pago OK · Falta anfitrión",
                                   badgeClass:
-                                    "bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-subtle)]",
-                                };
+                                    "bg-amber-500/15 text-amber-900 dark:text-amber-300 border border-amber-500/40",
+                                }
+                              : phase === "CONFIRMED" &&
+                                  booking.status !== "CHECKED_IN" &&
+                                  booking.status !== "COMPLETED"
+                                ? {
+                                    label: "Reserva confirmada ✓",
+                                    badgeClass: "badge-consorcio-friendly",
+                                  }
+                                : BOOKING_STATUS_LABELS[booking.status] ?? {
+                                    label: booking.status,
+                                    badgeClass:
+                                      "bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-subtle)]",
+                                  };
                     const formattedTotal = Number.isFinite(
                       Number(booking.totalAmount)
                     )
@@ -701,7 +797,16 @@ export function ProfileClient({
                         ? "Ir a pagar"
                         : booking.status === "PENDING_HOST_APPROVAL"
                           ? "Ver estado de solicitud"
-                          : "Ver ingreso y QR";
+                          : booking.status === "PAID_PENDING_KYC"
+                            ? "Completar Check-in"
+                            : booking.status === "ALL_ADULTS_VERIFIED" ||
+                                booking.status === "CHECKED_IN"
+                              ? "Abrir Check-in y QR"
+                              : "Ver ingreso y QR";
+                    const usePrimaryActionCta =
+                      booking.status === "PAID_PENDING_KYC" ||
+                      booking.status === "ALL_ADULTS_VERIFIED" ||
+                      booking.status === "CHECKED_IN";
 
                     return (
                       <li
@@ -749,7 +854,11 @@ export function ProfileClient({
                             )}
                             <Link
                               href={actionHref}
-                              className="btn-secondary-3d inline-flex min-h-[40px] shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-xs font-extrabold whitespace-nowrap"
+                              className={`${
+                                usePrimaryActionCta
+                                  ? "btn-primary-3d"
+                                  : "btn-secondary-3d"
+                              } inline-flex min-h-[40px] shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-xs font-extrabold whitespace-nowrap`}
                             >
                               <span>{actionLabel}</span>
                               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
