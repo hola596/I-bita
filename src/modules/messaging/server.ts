@@ -38,6 +38,7 @@ export interface ConversationRow {
   last_message_preview: string | null;
   last_message_at: Date | string;
   created_at: Date | string;
+  unread_count?: number | string | null;
 }
 
 export interface ConversationMessageRow {
@@ -76,6 +77,10 @@ export function mapConversationRow(row: ConversationRow): ConversationSummary {
       row.created_at instanceof Date
         ? row.created_at.toISOString()
         : String(row.created_at),
+    unreadCount:
+      row.unread_count !== undefined && row.unread_count !== null
+        ? Number(row.unread_count)
+        : 0,
   };
 }
 
@@ -757,4 +762,100 @@ export async function ensureBookingConversationWithPg(
     hostResponseDueAtIso: dueAtIso,
     hostResponseRatePct: hostMetrics.responseRatePct,
   });
+}
+
+export interface UserNotificationsSummary {
+  unreadMessagesCount: number;
+  unreadConversationsCount: number;
+  pendingHostRequestsCount: number;
+  totalAttentionCount: number;
+}
+
+export async function markConversationReadWithPg(
+  pg: Client,
+  conversationId: string,
+  userId: string
+): Promise<void> {
+  await pg.query(
+    `INSERT INTO public.conversation_read_states (conversation_id, user_id, last_read_at)
+     VALUES ($1::uuid, $2::uuid, NOW())
+     ON CONFLICT (conversation_id, user_id)
+     DO UPDATE SET last_read_at = GREATEST(public.conversation_read_states.last_read_at, NOW())`,
+    [conversationId, userId]
+  );
+}
+
+export async function getUserNotificationsSummaryWithPg(
+  pg: Client,
+  params: {
+    userId: string;
+    userEmail: string | null;
+    isAdmin: boolean;
+    isApprovedHost: boolean;
+  }
+): Promise<UserNotificationsSummary> {
+  const { userId, userEmail, isAdmin, isApprovedHost } = params;
+
+  const unreadRes = await pg.query<{
+    unread_messages: number;
+    unread_conversations: number;
+  }>(
+    `SELECT
+       COALESCE(SUM(t.unread_in_conv), 0)::int AS unread_messages,
+       COUNT(*) FILTER (WHERE t.unread_in_conv > 0)::int AS unread_conversations
+     FROM (
+       SELECT
+         (
+           SELECT COUNT(*)::int
+           FROM public.conversation_messages m
+           WHERE m.conversation_id = c.id
+             AND m.sender_id IS DISTINCT FROM $2::uuid
+             AND m.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
+         ) AS unread_in_conv
+       FROM public.conversations c
+       LEFT JOIN public.conversation_read_states rs
+         ON rs.conversation_id = c.id AND rs.user_id = $2::uuid
+       WHERE
+         $1::boolean = TRUE
+         OR c.guest_or_requester_id = $2::uuid
+         OR c.host_id = $2::uuid
+         OR (
+           COALESCE($3, '') <> ''
+           AND LOWER(COALESCE(c.requester_email, '')) = LOWER($3)
+         )
+     ) t`,
+    [isAdmin, userId, userEmail ?? ""]
+  );
+
+  const unreadMessagesCount = Number(unreadRes.rows[0]?.unread_messages ?? 0);
+  const unreadConversationsCount = Number(
+    unreadRes.rows[0]?.unread_conversations ?? 0
+  );
+
+  let pendingHostRequestsCount = 0;
+  if (isApprovedHost) {
+    const hostReqRes = await pg.query<{ pending_count: number }>(
+      `SELECT COUNT(*)::int AS pending_count
+       FROM public.bookings b
+       INNER JOIN public.properties p ON p.id = b.property_id
+       WHERE p.host_id = $1::uuid
+         AND (
+           b.status = 'PENDING_HOST_APPROVAL'
+           OR (
+             b.status IN ('PAID_PENDING_KYC', 'ALL_ADULTS_VERIFIED')
+             AND b.host_confirmed_at IS NULL
+             AND (b.hold_expires_at IS NULL OR b.hold_expires_at > NOW())
+           )
+         )`,
+      [userId]
+    );
+    pendingHostRequestsCount = Number(hostReqRes.rows[0]?.pending_count ?? 0);
+  }
+
+  return {
+    unreadMessagesCount,
+    unreadConversationsCount,
+    pendingHostRequestsCount,
+    totalAttentionCount: unreadMessagesCount + pendingHostRequestsCount,
+  };
 }

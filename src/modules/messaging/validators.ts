@@ -62,6 +62,7 @@ export interface ConversationSummary {
   lastMessagePreview: string | null;
   lastMessageAt: string;
   createdAt: string;
+  unreadCount?: number;
 }
 
 export interface ConversationMessageRecord {

@@ -8,11 +8,21 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icon3D } from "@/components/ui/Icon3D";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
 import { isCryptoPaymentsEnabled } from "@/lib/compliance/feature-flags";
+import { HostInfoPopover } from "@/components/layout/HostInfoPopover";
+import { NotificationCountBadge } from "@/components/layout/NotificationCountBadge";
+import {
+  EMPTY_NOTIFICATIONS_SUMMARY,
+  NOTIFICATIONS_REFRESH_EVENT,
+  fetchNotificationsSummary,
+  type NotificationsSummaryPayload,
+} from "@/lib/notifications/client-events";
 
 interface NavItem {
   href: string;
   label: string;
   matchPrefix: string;
+  badgeCount?: number;
+  badgeLabel?: string;
 }
 
 interface SessionUserSummary {
@@ -61,6 +71,8 @@ export function AppHeader() {
   const [sessionUser, setSessionUser] = useState<SessionUserSummary | null>(
     null
   );
+  const [notificationsSummary, setNotificationsSummary] =
+    useState<NotificationsSummaryPayload>(EMPTY_NOTIFICATIONS_SUMMARY);
 
   useEffect(() => {
     let active = true;
@@ -75,14 +87,18 @@ export function AppHeader() {
 
         if (!user) {
           setSessionUser(null);
+          setNotificationsSummary(EMPTY_NOTIFICATIONS_SUMMARY);
           return;
         }
 
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("full_name, role, host_approval_status")
-          .eq("id", user.id)
-          .maybeSingle();
+        const [{ data: profile }, summary] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("full_name, role, host_approval_status")
+            .eq("id", user.id)
+            .maybeSingle(),
+          fetchNotificationsSummary(),
+        ]);
 
         if (!active) return;
 
@@ -93,8 +109,20 @@ export function AppHeader() {
           role: profile?.role ?? null,
           hostApprovalStatus: profile?.host_approval_status ?? null,
         });
+        setNotificationsSummary(summary);
       } catch {
-        if (active) setSessionUser(null);
+        if (active) {
+          setSessionUser(null);
+          setNotificationsSummary(EMPTY_NOTIFICATIONS_SUMMARY);
+        }
+      }
+    }
+
+    async function refreshNotificationsOnly() {
+      if (!active) return;
+      const summary = await fetchNotificationsSummary();
+      if (active) {
+        setNotificationsSummary(summary);
       }
     }
 
@@ -106,9 +134,32 @@ export function AppHeader() {
       void syncSessionUser();
     });
 
+    const onCustomRefresh = () => {
+      void refreshNotificationsOnly();
+    };
+    const onWindowFocus = () => {
+      if (document.visibilityState === "visible") {
+        void refreshNotificationsOnly();
+      }
+    };
+
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onCustomRefresh);
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onWindowFocus);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshNotificationsOnly();
+      }
+    }, 45000);
+
     return () => {
       active = false;
       subscription.unsubscribe();
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onCustomRefresh);
+      window.removeEventListener("focus", onWindowFocus);
+      document.removeEventListener("visibilitychange", onWindowFocus);
+      window.clearInterval(intervalId);
     };
   }, [pathname]);
 
@@ -135,19 +186,27 @@ export function AppHeader() {
       matchPrefix: "/p/",
     },
     ...(sessionUser
-      ? [{ href: "/mensajes", label: "Mensajes", matchPrefix: "/mensajes" }]
+      ? [
+          {
+            href: "/mensajes",
+            label: "Mensajes",
+            matchPrefix: "/mensajes",
+            badgeCount: notificationsSummary.unreadMessagesCount,
+            badgeLabel: `${notificationsSummary.unreadMessagesCount} mensajes sin leer`,
+          },
+        ]
       : []),
-    isApprovedHost
-      ? {
-          href: "/dashboard/propiedades",
-          label: "Mis propiedades",
-          matchPrefix: "/dashboard",
-        }
-      : {
-          href: "/onboarding/anfitrion",
-          label: "Ser anfitrión",
-          matchPrefix: "/onboarding/anfitrion",
-        },
+    ...(isApprovedHost
+      ? [
+          {
+            href: "/dashboard/propiedades",
+            label: "Mis propiedades",
+            matchPrefix: "/dashboard",
+            badgeCount: notificationsSummary.pendingHostRequestsCount,
+            badgeLabel: `${notificationsSummary.pendingHostRequestsCount} solicitudes pendientes`,
+          },
+        ]
+      : []),
     { href: "/contacto", label: "Ayuda", matchPrefix: "/contacto" },
   ];
 
@@ -195,28 +254,45 @@ export function AppHeader() {
         </Link>
 
         {/* Navegación principal diferenciada por rol */}
-        <nav
-          aria-label="Navegación principal"
-          className="hidden lg:flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/85 p-1"
-        >
-          {primaryNav.map((item) => {
-            const active = isNavActive(item);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={`inline-flex min-h-[38px] items-center rounded-full px-4 text-xs font-extrabold transition-colors whitespace-nowrap ${
-                  active
-                    ? "bg-[var(--bg-primary)] text-[var(--brand-primary)] shadow-xs border border-[var(--border-subtle)]"
-                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-primary)]/60"
-                }`}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+        <div className="hidden lg:flex items-center gap-2">
+          <nav
+            aria-label="Navegación principal"
+            className="flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/85 p-1"
+          >
+            {primaryNav.map((item) => {
+              const active = isNavActive(item);
+              const badgeCount = item.badgeCount ?? 0;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={
+                    badgeCount > 0 ? `${item.label} (${item.badgeLabel})` : undefined
+                  }
+                  className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-full px-4 text-xs font-extrabold transition-colors whitespace-nowrap ${
+                    active
+                      ? "bg-[var(--bg-primary)] text-[var(--brand-primary)] shadow-xs border border-[var(--border-subtle)]"
+                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-primary)]/60"
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  <NotificationCountBadge
+                    count={badgeCount}
+                    label={item.badgeLabel}
+                  />
+                </Link>
+              );
+            })}
+          </nav>
+
+          {!isApprovedHost && (
+            <HostInfoPopover
+              mode="desktop"
+              active={pathname.startsWith("/onboarding/anfitrion")}
+            />
+          )}
+        </div>
 
         {/* Controles de personalización, moneda y estado de sesión */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
@@ -349,7 +425,7 @@ export function AppHeader() {
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-nav-drawer"
             aria-label={mobileMenuOpen ? "Cerrar menú" : "Abrir menú de navegación"}
-            className="lg:hidden inline-flex min-h-[42px] items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 text-xs font-extrabold text-[var(--text-primary)] cursor-pointer"
+            className="lg:hidden relative inline-flex min-h-[42px] items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 text-xs font-extrabold text-[var(--text-primary)] cursor-pointer"
           >
             {mobileMenuOpen ? (
               <X className="h-4 w-4" aria-hidden="true" />
@@ -357,6 +433,12 @@ export function AppHeader() {
               <Menu className="h-4 w-4" aria-hidden="true" />
             )}
             <span>{mobileMenuOpen ? "Cerrar" : "Menú"}</span>
+            {!mobileMenuOpen && (
+              <NotificationCountBadge
+                count={notificationsSummary.totalAttentionCount}
+                label={`${notificationsSummary.totalAttentionCount} novedades pendientes`}
+              />
+            )}
           </button>
         </div>
       </div>
@@ -415,6 +497,7 @@ export function AppHeader() {
           <nav aria-label="Menú móvil" className="grid grid-cols-1 gap-2">
             {primaryNav.map((item) => {
               const active = isNavActive(item);
+              const badgeCount = item.badgeCount ?? 0;
               return (
                 <Link
                   key={item.href}
@@ -427,13 +510,26 @@ export function AppHeader() {
                       : "border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-primary)]"
                   }`}
                 >
-                  <span>{item.label}</span>
+                  <span className="inline-flex items-center gap-2">
+                    <span>{item.label}</span>
+                    <NotificationCountBadge
+                      count={badgeCount}
+                      label={item.badgeLabel}
+                    />
+                  </span>
                   {active && (
                     <span className="text-xs font-bold">Estás acá</span>
                   )}
                 </Link>
               );
             })}
+            {!isApprovedHost && (
+              <HostInfoPopover
+                mode="mobile"
+                active={pathname.startsWith("/onboarding/anfitrion")}
+                onNavigate={() => setMobileMenuOpen(false)}
+              />
+            )}
             {!sessionUser && (
               <Link
                 href="/login"

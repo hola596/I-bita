@@ -6,11 +6,18 @@ import { usePathname } from "next/navigation";
 import {
   Building2,
   Compass,
+  HelpCircle,
   MessageSquare,
   Search,
   User,
 } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  EMPTY_NOTIFICATIONS_SUMMARY,
+  NOTIFICATIONS_REFRESH_EVENT,
+  fetchNotificationsSummary,
+  type NotificationsSummaryPayload,
+} from "@/lib/notifications/client-events";
 
 interface MobileSessionSummary {
   id: string;
@@ -35,6 +42,8 @@ export function MobileBottomNav() {
   const [sessionUser, setSessionUser] = useState<MobileSessionSummary | null>(
     null
   );
+  const [notificationsSummary, setNotificationsSummary] =
+    useState<NotificationsSummaryPayload>(EMPTY_NOTIFICATIONS_SUMMARY);
 
   const shouldHide = HIDDEN_PREFIXES.some((prefix) =>
     pathname.startsWith(prefix)
@@ -55,14 +64,18 @@ export function MobileBottomNav() {
 
         if (!user) {
           setSessionUser(null);
+          setNotificationsSummary(EMPTY_NOTIFICATIONS_SUMMARY);
           return;
         }
 
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role, host_approval_status")
-          .eq("id", user.id)
-          .maybeSingle();
+        const [{ data: profile }, summary] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select("role, host_approval_status")
+            .eq("id", user.id)
+            .maybeSingle(),
+          fetchNotificationsSummary(),
+        ]);
 
         if (!active) return;
 
@@ -71,8 +84,20 @@ export function MobileBottomNav() {
           role: profile?.role ?? null,
           hostApprovalStatus: profile?.host_approval_status ?? null,
         });
+        setNotificationsSummary(summary);
       } catch {
-        if (active) setSessionUser(null);
+        if (active) {
+          setSessionUser(null);
+          setNotificationsSummary(EMPTY_NOTIFICATIONS_SUMMARY);
+        }
+      }
+    }
+
+    async function refreshNotificationsOnly() {
+      if (!active) return;
+      const summary = await fetchNotificationsSummary();
+      if (active) {
+        setNotificationsSummary(summary);
       }
     }
 
@@ -84,9 +109,15 @@ export function MobileBottomNav() {
       void syncSessionUser();
     });
 
+    const onCustomRefresh = () => {
+      void refreshNotificationsOnly();
+    };
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onCustomRefresh);
+
     return () => {
       active = false;
       subscription.unsubscribe();
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onCustomRefresh);
     };
   }, [pathname, shouldHide]);
 
@@ -99,20 +130,25 @@ export function MobileBottomNav() {
     (sessionUser?.role === "HOST" &&
       sessionUser?.hostApprovalStatus === "APPROVED");
 
-  const items = [
+  const items: Array<{
+    href: string;
+    label: string;
+    icon: typeof Compass;
+    active: boolean;
+    showOnlineDot?: boolean;
+    badgeCount?: number;
+  }> = [
     {
       href: "/",
       label: "Inicio",
       icon: Compass,
       active: pathname === "/",
-      showOnlineDot: false,
     },
     {
       href: "/#alojamientos-disponibles",
       label: "Buscar",
       icon: Search,
       active: pathname.startsWith("/p/"),
-      showOnlineDot: false,
     },
     ...(sessionUser
       ? [
@@ -121,19 +157,28 @@ export function MobileBottomNav() {
             label: "Mensajes",
             icon: MessageSquare,
             active: pathname.startsWith("/mensajes"),
-            showOnlineDot: false,
+            badgeCount: notificationsSummary.unreadMessagesCount,
+          },
+        ]
+      : [
+          {
+            href: "/contacto",
+            label: "Ayuda",
+            icon: HelpCircle,
+            active: pathname.startsWith("/contacto"),
+          },
+        ]),
+    ...(isApprovedHost
+      ? [
+          {
+            href: "/dashboard/propiedades",
+            label: "Panel",
+            icon: Building2,
+            active: pathname.startsWith("/dashboard"),
+            badgeCount: notificationsSummary.pendingHostRequestsCount,
           },
         ]
       : []),
-    {
-      href: isApprovedHost ? "/dashboard/propiedades" : "/onboarding/anfitrion",
-      label: isApprovedHost ? "Panel" : "Anfitrión",
-      icon: Building2,
-      active:
-        pathname.startsWith("/dashboard") ||
-        pathname.startsWith("/onboarding/anfitrion"),
-      showOnlineDot: false,
-    },
     {
       href: sessionUser ? "/perfil" : "/login",
       label: sessionUser ? "Perfil" : "Ingresar",
@@ -141,22 +186,20 @@ export function MobileBottomNav() {
       active: pathname === "/perfil" || pathname.startsWith("/login"),
       showOnlineDot: Boolean(sessionUser),
     },
-  ] as const;
+  ];
+
+  const gridColsClass =
+    items.length >= 5 ? "grid grid-cols-5 gap-0.5" : "grid grid-cols-4 gap-0.5";
 
   return (
     <nav
       aria-label="Navegación rápida móvil"
       className="lg:hidden fixed bottom-3.5 left-1/2 -translate-x-1/2 z-30 w-[calc(100%-1.5rem)] max-w-md rounded-full border border-white/15 bg-slate-950/92 px-1.5 py-1.5 text-white shadow-[0_14px_34px_-8px_rgba(15,23,42,0.65)] backdrop-blur-xl dark:border-white/20 dark:bg-slate-900/95"
     >
-      <div
-        className={
-          items.length === 5
-            ? "grid grid-cols-5 gap-0.5"
-            : "grid grid-cols-4 gap-0.5"
-        }
-      >
+      <div className={gridColsClass}>
         {items.map((item) => {
           const Icon = item.icon;
+          const badge = item.badgeCount ?? 0;
           return (
             <Link
               key={item.href}
@@ -170,12 +213,19 @@ export function MobileBottomNav() {
             >
               <span className="relative inline-flex items-center justify-center">
                 <Icon className="h-4 w-4" aria-hidden="true" />
-                {item.showOnlineDot && (
+                {badge > 0 ? (
+                  <span
+                    aria-label={`${badge} notificaciones nuevas`}
+                    className="absolute -right-2.5 -top-1.5 inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#d90b38] px-1 text-[9px] font-black leading-none text-white ring-2 ring-slate-950"
+                  >
+                    {badge > 9 ? "9+" : badge}
+                  </span>
+                ) : item.showOnlineDot ? (
                   <span
                     aria-hidden="true"
                     className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full border border-slate-950 bg-emerald-400"
                   />
-                )}
+                ) : null}
               </span>
               <span>{item.label}</span>
             </Link>

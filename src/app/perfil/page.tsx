@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { Client } from "pg";
+import { env } from "@/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { HostApprovalStatus } from "@/modules/auth/actions";
 import { getHostEarningsSummary } from "@/modules/payments/host-earnings";
 import { getHostResponseMetricsSummary } from "@/modules/hosts/response-sla";
+import {
+  getUserNotificationsSummaryWithPg,
+  isMessagingAdmin,
+} from "@/modules/messaging/server";
 import {
   ProfileClient,
   type ProfileClientProps,
@@ -170,6 +176,30 @@ export default async function ProfilePage() {
       process.env.NODE_ENV !== "production" ||
       mappedProfile?.role === "SUPERADMIN";
 
+    let unreadMessagesCount = 0;
+    try {
+      const pg = new Client({
+        connectionString: env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      });
+      await pg.connect();
+      try {
+        const isAdmin = await isMessagingAdmin(pg, user.id);
+        const notif = await getUserNotificationsSummaryWithPg(pg, {
+          userId: user.id,
+          userEmail: user.email,
+          isAdmin,
+          isApprovedHost,
+        });
+        unreadMessagesCount = notif.unreadMessagesCount;
+      } finally {
+        await pg.end();
+      }
+    } catch {
+      unreadMessagesCount = 0;
+    }
+
     return (
       <ProfileClient
         user={user}
@@ -178,6 +208,7 @@ export default async function ProfilePage() {
         guestBookings={guestBookings}
         hostEarnings={hostEarnings}
         hostResponseMetrics={hostResponseMetrics}
+        unreadMessagesCount={unreadMessagesCount}
         canReviewInDev={canReviewInDev}
       />
     );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -26,6 +26,7 @@ import {
 } from "@/modules/messaging/validators";
 import { Icon3D } from "@/components/ui/Icon3D";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/client-events";
 
 interface MessagesCenterClientProps {
   currentUserId: string;
@@ -96,6 +97,16 @@ export function MessagesCenterClient({
   const [sending, setSending] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!initialActiveConversation) return;
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === initialActiveConversation.id ? { ...c, unreadCount: 0 } : c
+      )
+    );
+    dispatchNotificationsRefresh();
+  }, [initialActiveConversation]);
+
   const visibleConversations = useMemo(() => {
     if (filterKind === "ALL") return conversations;
     if (filterKind === "BOOKING_INTERVIEW") {
@@ -152,6 +163,12 @@ export function MessagesCenterClient({
 
     setActiveConversation(res.data.conversation);
     setMessages(res.data.messages);
+    setConversations((prev) =>
+      prev.map((item) =>
+        item.id === convId ? { ...item, unreadCount: 0 } : item
+      )
+    );
+    dispatchNotificationsRefresh();
   }
 
   async function refreshAll() {
@@ -213,6 +230,7 @@ export function MessagesCenterClient({
               ...item,
               lastMessagePreview: saved.body.slice(0, 140),
               lastMessageAt: saved.createdAt,
+              unreadCount: 0,
             }
           : item
       );
@@ -220,6 +238,7 @@ export function MessagesCenterClient({
         b.lastMessageAt.localeCompare(a.lastMessageAt)
       );
     });
+    dispatchNotificationsRefresh();
   }
 
   function resolveContextAction(conv: ConversationSummary): {
@@ -372,6 +391,7 @@ export function MessagesCenterClient({
             <ul className="space-y-2 max-h-[540px] overflow-y-auto pr-0.5">
               {visibleConversations.map((conv) => {
                 const isSelected = activeConversation?.id === conv.id;
+                const unread = isSelected ? 0 : (conv.unreadCount ?? 0);
                 const counterpart =
                   conv.hostId === currentUserId
                     ? conv.requesterName || conv.requesterEmail || "Huésped"
@@ -390,15 +410,24 @@ export function MessagesCenterClient({
                       className={`w-full text-left rounded-2xl border p-3.5 space-y-1.5 transition-colors cursor-pointer ${
                         isSelected
                           ? "border-[var(--brand-primary)] bg-[var(--surface-tint)]/60 shadow-xs"
-                          : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 hover:border-[var(--brand-primary)]/50"
+                          : unread > 0
+                            ? "border-[var(--brand-primary)]/55 bg-[var(--surface-tint)]/35 hover:border-[var(--brand-primary)]"
+                            : "border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 hover:border-[var(--brand-primary)]/50"
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${KIND_BADGE_CLASS[conv.kind]}`}
-                        >
-                          {CONVERSATION_KIND_LABELS[conv.kind]}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${KIND_BADGE_CLASS[conv.kind]}`}
+                          >
+                            {CONVERSATION_KIND_LABELS[conv.kind]}
+                          </span>
+                          {unread > 0 && (
+                            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--brand-primary)] px-1 text-[10px] font-black text-white">
+                              {unread > 9 ? "9+" : unread}
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] font-bold text-[var(--text-secondary)] shrink-0">
                           {formatDateTimeAr(conv.lastMessageAt)}
                         </span>

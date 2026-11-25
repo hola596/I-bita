@@ -29,6 +29,7 @@ import { HostEarningsPanel } from "@/components/host/HostEarningsPanel";
 import { HostResponseProfileCard } from "@/components/host/HostResponseProfileCard";
 import { Icon3D } from "@/components/ui/Icon3D";
 import { AchievementBanner } from "@/components/ui/AchievementBanner";
+import { NotificationCountBadge } from "@/components/layout/NotificationCountBadge";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
 import {
   formatHoldRemainingLabel,
@@ -75,6 +76,7 @@ export interface ProfileClientProps {
   }>;
   hostEarnings?: HostEarningsSummary | null;
   hostResponseMetrics?: HostResponseMetrics | null;
+  unreadMessagesCount?: number;
   canReviewInDev?: boolean;
 }
 
@@ -152,6 +154,7 @@ export function ProfileClient({
   guestBookings,
   hostEarnings = null,
   hostResponseMetrics = null,
+  unreadMessagesCount = 0,
   canReviewInDev = false,
 }: ProfileClientProps) {
   const router = useRouter();
@@ -294,7 +297,7 @@ export function ProfileClient({
           </div>
 
           {/* Botones principales acordes a la experiencia del usuario */}
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2.5 md:justify-end">
             {isApprovedHost ? (
               <>
                 <Link
@@ -345,6 +348,10 @@ export function ProfileClient({
             >
               <MessageSquare className="h-4 w-4" aria-hidden="true" />
               <span>Mensajes</span>
+              <NotificationCountBadge
+                count={unreadMessagesCount}
+                label={`${unreadMessagesCount} mensajes sin leer`}
+              />
             </Link>
 
             <button

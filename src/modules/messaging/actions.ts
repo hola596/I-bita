@@ -23,6 +23,7 @@ import {
   isMessagingAdmin,
   mapConversationRow,
   mapMessageRow,
+  markConversationReadWithPg,
   type ConversationMessageRow,
   type ConversationRow,
 } from "./server";
@@ -89,11 +90,20 @@ export async function listMyConversationsAction(): Promise<
          c.contact_inquiry_id,
          c.last_message_preview,
          c.last_message_at,
-         c.created_at
+         c.created_at,
+         (
+           SELECT COUNT(*)::int
+           FROM public.conversation_messages m
+           WHERE m.conversation_id = c.id
+             AND m.sender_id IS DISTINCT FROM $2::uuid
+             AND m.created_at > COALESCE(rs.last_read_at, '1970-01-01'::timestamptz)
+         ) AS unread_count
        FROM public.conversations c
        LEFT JOIN public.profiles hp ON hp.id = c.host_id
        LEFT JOIN public.properties p ON p.id = c.property_id
        LEFT JOIN public.bookings b ON b.id = c.booking_id
+       LEFT JOIN public.conversation_read_states rs
+         ON rs.conversation_id = c.id AND rs.user_id = $2::uuid
        WHERE
          $1::boolean = TRUE
          OR c.guest_or_requester_id = $2::uuid
@@ -225,10 +235,12 @@ export async function getConversationMessagesAction(
       [conv.id]
     );
 
+    await markConversationReadWithPg(pg, conv.id, user.id);
+
     return {
       ok: true,
       data: {
-        conversation: mapConversationRow(conv),
+        conversation: mapConversationRow({ ...conv, unread_count: 0 }),
         messages: msgRes.rows.map(mapMessageRow),
       },
     };
@@ -362,6 +374,8 @@ export async function sendConversationMessageAction(
       body: parsed.data.body,
       messageType: parsed.data.messageType,
     });
+
+    await markConversationReadWithPg(pg, conv.id, user.id);
 
     if (conv.booking_id && senderRole === "HOST") {
       await pg.query(
