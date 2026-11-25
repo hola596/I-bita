@@ -8,7 +8,7 @@ import {
 } from "@/modules/consortium/actions";
 import { BiometricCheckinFlow } from "@/components/kyc/BiometricCheckinFlow";
 import { Icon3D } from "@/components/ui/Icon3D";
-import { AchievementBanner } from "@/components/ui/AchievementBanner";
+import { getContractDetailsAction } from "@/modules/contracts/actions";
 import { getBookingHostResponseState } from "@/modules/hosts/response-sla";
 import { HostResponseWindowCard } from "@/components/host/HostResponseWindowCard";
 
@@ -44,14 +44,16 @@ export default async function BiometricPreCheckinPage({
   const checkinState = stateRes.data;
   const { booking, consortium } = checkinState;
 
-  const [accessRes, hostResponseState] = await Promise.all([
-    getBookingAccessDetailsAction(
-      booking.id,
-      token ?? checkinState.activeSlot?.inviteToken ?? null
-    ),
+  const resolvedToken = token ?? checkinState.activeSlot?.inviteToken ?? null;
+  const [accessRes, contractRes, hostResponseState] = await Promise.all([
+    getBookingAccessDetailsAction(booking.id, resolvedToken),
+    getContractDetailsAction(booking.id, resolvedToken),
     getBookingHostResponseState(booking.id),
   ]);
   const access = accessRes.ok ? accessRes.data : null;
+  const initialContractSigned = Boolean(
+    contractRes.ok && contractRes.data?.guestSignedAt
+  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -115,8 +117,12 @@ export default async function BiometricPreCheckinPage({
         </div>
       </header>
 
-      {/* Asistente paso a paso de confirmación */}
-      <BiometricCheckinFlow initialState={checkinState} />
+      {/* Asistente paso a paso de confirmación y próximos pasos en vivo */}
+      <BiometricCheckinFlow
+        initialState={checkinState}
+        initialAccess={access}
+        initialContractSigned={initialContractSigned}
+      />
 
       {/* Ventana sincronizada de respuesta e instrucciones de ingreso del anfitrión */}
       {hostResponseState && (
@@ -128,79 +134,6 @@ export default async function BiometricPreCheckinPage({
           windowSummary={hostResponseState}
         />
       )}
-
-      {/* Entrega segura de la clave de entrada y pase de portería */}
-      <section
-        aria-labelledby="access-gate-heading"
-        className="surface-card p-6 sm:p-8 space-y-4"
-      >
-        <div className="flex items-center gap-3">
-          <Icon3D name="key" size="md" />
-          <div>
-            <h2 id="access-gate-heading" className="text-xl font-extrabold">
-              Tu clave de entrada y pase para portería
-            </h2>
-            <p className="text-xs text-[var(--text-secondary)]">
-              Se habilitan automáticamente en cuanto todos los adultos completan
-              su validación.
-            </p>
-          </div>
-        </div>
-
-        {access && access.accessCode ? (
-          <div className="space-y-4">
-            <AchievementBanner
-              icon="trophy"
-              tone="emerald"
-              title="¡Todo listo! Ya tenés tu ingreso habilitado"
-              description="Usá este código en la cerradura al llegar y mostrá el QR si el encargado te lo pide."
-            />
-
-            <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5 space-y-4">
-              <p className="text-sm font-bold">
-                Código de la puerta:{" "}
-                <code className="ml-2 rounded-xl bg-[var(--bg-primary)] border border-[var(--border-subtle)] px-4 py-1.5 text-xl font-black tracking-wider">
-                  {access.accessCode}
-                </code>
-              </p>
-              {access.porteriaPass && (
-                <div className="space-y-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={access.porteriaPass.qrDataUrl}
-                    alt="Código QR del Pase Digital de Portería"
-                    width={220}
-                    height={220}
-                    className="rounded-2xl bg-white p-3 border border-[var(--border-subtle)]"
-                  />
-                  <p className="text-xs">
-                    <a
-                      className="btn-secondary-3d inline-flex min-h-[40px] items-center rounded-xl px-4 font-extrabold"
-                      href={access.porteriaPass.verificationUrl}
-                    >
-                      Abrir pase digital para portería →
-                    </a>
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 flex items-start gap-3 text-xs sm:text-sm text-[var(--text-secondary)]">
-            <Lock
-              className="h-4 w-4 shrink-0 mt-0.5 text-amber-600"
-              aria-hidden="true"
-            />
-            <p className="leading-relaxed">
-              Por tranquilidad del consorcio, la clave de la cerradura permanece
-              guardada hasta que{" "}
-              <strong>todos los adultos declarados</strong> completen los 3
-              pasos de arriba. Cuando terminen, recargá esta página para ver tu
-              código.
-            </p>
-          </div>
-        )}
-      </section>
     </div>
   );
 }

@@ -1,21 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
   Check,
-  Clock,
   Copy,
   Loader2,
   Lock,
   Sparkles,
   Users,
 } from "lucide-react";
-import type {
-  BookingCheckinState,
-  SanitizedVerificationSlotSummary,
+import {
+  getBookingAccessDetailsAction,
+  type BookingAccessDetails,
+  type BookingCheckinState,
+  type SanitizedVerificationSlotSummary,
 } from "@/modules/consortium/actions";
 import { compressAndValidateKycImage } from "@/lib/kyc/imageQuality";
 import type {
@@ -34,9 +36,12 @@ import {
   LiveSelfieCapture,
   type LiveSelfieCaptureResult,
 } from "./LiveSelfieCapture";
+import { PostVerificationNextSteps } from "./PostVerificationNextSteps";
 
 export interface BiometricCheckinFlowProps {
   initialState: BookingCheckinState;
+  initialAccess?: BookingAccessDetails | null;
+  initialContractSigned?: boolean;
 }
 
 const ENABLE_KYC_MOCK =
@@ -105,13 +110,20 @@ function getFriendlySlotStatus(
 
 export function BiometricCheckinFlow({
   initialState,
+  initialAccess = null,
+  initialContractSigned = false,
 }: BiometricCheckinFlowProps) {
+  const router = useRouter();
   const { notify } = usePreferences();
+  const postVerifyRef = useRef<HTMLDivElement | null>(null);
 
   const [booking, setBooking] = useState(initialState.booking);
   const [slots, setSlots] = useState<SanitizedVerificationSlotSummary[]>(
     initialState.slots
   );
+  const [accessDetails, setAccessDetails] =
+    useState<BookingAccessDetails | null>(initialAccess);
+  const [loadingAccess, setLoadingAccess] = useState(false);
   const [selectedToken, setSelectedToken] = useState<string>(
     initialState.activeSlot?.inviteToken ??
       initialState.slots[0]?.inviteToken ??
@@ -320,13 +332,37 @@ export function BiometricCheckinFlow({
           "shield"
         );
       } else {
+        if (data.allAdultsVerified) {
+          setLoadingAccess(true);
+          try {
+            const unlockedRes = await getBookingAccessDetailsAction(
+              booking.id,
+              activeSlot.inviteToken
+            );
+            if (unlockedRes.ok) {
+              setAccessDetails(unlockedRes.data);
+            }
+          } finally {
+            setLoadingAccess(false);
+          }
+        }
         notify(
           data.allAdultsVerified
-            ? "¡Grupo 100% confirmado! Recargá la página para ver tu clave de entrada."
-            : "¡Identidad aprobada! Podés seguir con la siguiente persona.",
+            ? "¡Check-in completado! Ya tenés tu código de entrada y tus próximos pasos."
+            : "¡Identidad aprobada! Podés continuar con la siguiente persona.",
           "celebration",
           "trophy"
         );
+        router.refresh();
+      }
+
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          postVerifyRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
       }
     } catch {
       setSubmitState({
@@ -351,6 +387,26 @@ export function BiometricCheckinFlow({
       prev.status === "rejected" ? { status: "idle" } : prev
     );
   };
+
+  const isActiveSlotCompleted =
+    activeSlot?.status === "VERIFIED" ||
+    activeSlot?.status === "MANUAL_REVIEW";
+
+  const nextPendingSlot = useMemo(
+    () =>
+      slots.find(
+        (s) =>
+          s.inviteToken !== activeSlot?.inviteToken &&
+          s.status !== "VERIFIED" &&
+          s.status !== "MANUAL_REVIEW"
+      ) ?? null,
+    [slots, activeSlot?.inviteToken]
+  );
+
+  const pendingCount = useMemo(
+    () => slots.filter((s) => s.status !== "VERIFIED").length,
+    [slots]
+  );
 
   return (
     <div className="space-y-6">
@@ -431,7 +487,27 @@ export function BiometricCheckinFlow({
             const isVerified = slot.status === "VERIFIED";
             const isManualReview = slot.status === "MANUAL_REVIEW";
 
-            return (
+            const isActiveSlotCompleted =
+    activeSlot?.status === "VERIFIED" ||
+    activeSlot?.status === "MANUAL_REVIEW";
+
+  const nextPendingSlot = useMemo(
+    () =>
+      slots.find(
+        (s) =>
+          s.inviteToken !== activeSlot?.inviteToken &&
+          s.status !== "VERIFIED" &&
+          s.status !== "MANUAL_REVIEW"
+      ) ?? null,
+    [slots, activeSlot?.inviteToken]
+  );
+
+  const pendingCount = useMemo(
+    () => slots.filter((s) => s.status !== "VERIFIED").length,
+    [slots]
+  );
+
+  return (
               <div
                 key={slot.id}
                 className={`rounded-2xl border p-4 transition-all space-y-3 ${
@@ -524,9 +600,25 @@ export function BiometricCheckinFlow({
         </div>
       </section>
 
-      {/* Asistente progresivo de 3 pasos para el adulto elegido */}
-      {activeSlot && (
-        <form onSubmit={handleSubmitBiometrics} className="space-y-6">
+      {/* Próximo paso automático al confirmar identidad, o asistente de 3 pasos si falta validar */}
+      <div ref={postVerifyRef}>
+        {activeSlot && isActiveSlotCompleted ? (
+          <PostVerificationNextSteps
+            booking={booking}
+            consortium={initialState.consortium}
+            activeSlot={activeSlot}
+            nextPendingSlot={nextPendingSlot}
+            pendingCount={pendingCount}
+            accessDetails={accessDetails}
+            loadingAccess={loadingAccess}
+            contractSigned={initialContractSigned}
+            similarityScore={submitState.similarityScore}
+            livenessScore={submitState.livenessScore}
+            onSelectNextPendingSlot={handleSelectSlot}
+            onCopyInviteLink={handleCopyInviteLink}
+          />
+        ) : activeSlot ? (
+          <form onSubmit={handleSubmitBiometrics} className="space-y-6">
           <div className="surface-card p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-extrabold text-[var(--text-primary)]">
@@ -552,7 +644,27 @@ export function BiometricCheckinFlow({
                   (item.step === 1 && consentAccepted && wizardStep > 1) ||
                   (item.step === 2 && Boolean(parsedDni) && wizardStep > 2);
 
-                return (
+                const isActiveSlotCompleted =
+    activeSlot?.status === "VERIFIED" ||
+    activeSlot?.status === "MANUAL_REVIEW";
+
+  const nextPendingSlot = useMemo(
+    () =>
+      slots.find(
+        (s) =>
+          s.inviteToken !== activeSlot?.inviteToken &&
+          s.status !== "VERIFIED" &&
+          s.status !== "MANUAL_REVIEW"
+      ) ?? null,
+    [slots, activeSlot?.inviteToken]
+  );
+
+  const pendingCount = useMemo(
+    () => slots.filter((s) => s.status !== "VERIFIED").length,
+    [slots]
+  );
+
+  return (
                   <button
                     key={item.step}
                     type="button"
@@ -795,37 +907,6 @@ export function BiometricCheckinFlow({
                 </div>
               )}
 
-              {submitState.status === "manual_review" && (
-                <div
-                  role="status"
-                  className="flex items-start gap-2.5 rounded-2xl border border-sky-500/40 bg-sky-500/12 text-sky-950 dark:text-sky-100 p-4 text-xs font-bold"
-                >
-                  <Clock
-                    className="h-4 w-4 shrink-0 mt-0.5 text-sky-700 dark:text-sky-300"
-                    aria-hidden="true"
-                  />
-                  <div className="space-y-1">
-                    <p className="font-extrabold">
-                      Verificación en revisión manual
-                    </p>
-                    <p>{submitState.message}</p>
-                  </div>
-                </div>
-              )}
-
-              {submitState.status === "verified" && (
-                <AchievementBanner
-                  icon="trophy"
-                  tone="emerald"
-                  title={`¡Identidad confirmada! (Similitud ${Math.round(
-                    (submitState.similarityScore ?? 0) * 100
-                  )}% · Vida ${Math.round(
-                    (submitState.livenessScore ?? 0) * 100
-                  )}%)`}
-                  description={submitState.message ?? "Ya podés continuar."}
-                />
-              )}
-
               <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                 <button
                   type="button"
@@ -865,6 +946,32 @@ export function BiometricCheckinFlow({
             </section>
           )}
         </form>
+        ) : null}
+      </div>
+
+      {!booking.allAdultsVerified && (
+        <section
+          aria-labelledby="access-gate-locked-heading"
+          className="surface-card p-5 sm:p-6 flex items-start gap-3 text-xs sm:text-sm text-[var(--text-secondary)]"
+        >
+          <Lock
+            className="h-4 w-4 shrink-0 mt-0.5 text-amber-600"
+            aria-hidden="true"
+          />
+          <div className="space-y-1">
+            <h2
+              id="access-gate-locked-heading"
+              className="text-sm font-extrabold text-[var(--text-primary)]"
+            >
+              Clave de ingreso y pase de portería resguardados
+            </h2>
+            <p className="leading-relaxed">
+              Por tranquilidad del consorcio, la clave de la cerradura se libera automáticamente en pantalla en cuanto{" "}
+              <strong>todos los adultos declarados ({booking.declaredAdultsCount})</strong>{" "}
+              completen los 3 pasos.
+            </p>
+          </div>
+        </section>
       )}
     </div>
   );
