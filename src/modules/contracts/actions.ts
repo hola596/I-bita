@@ -421,33 +421,38 @@ export async function generateAndSignContractAction(
     const pdfBuffer = Buffer.from(pdfBytes);
     const pdfSha256Hash = crypto.createHash("sha256").update(pdfBuffer).digest("hex");
 
-    // 3. Subir el PDF a Supabase Storage privado (Subtarea 4.3.3)
-    try {
-      await pg.query(
-        `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-         VALUES ($1, $1, FALSE, 10485760, ARRAY['application/pdf'])
-         ON CONFLICT (id) DO UPDATE SET public = FALSE`,
-        [CONTRACT_STORAGE_BUCKET]
-      );
-    } catch {
-      // Continuar si storage.buckets es administrado externamente
-    }
-
+    // 3. Subir el PDF a Supabase Storage privado (Subtarea 4.3.3, sin bloquear storage.buckets dentro de SQL TX)
     const storagePath =
       requestedKind === "SHORT_STAY_SIMPLE"
         ? `contracts/${auth.bookingId}/acuerdo-estadia-corta.pdf`
         : `contracts/${auth.bookingId}/contract-art1199.pdf`;
     try {
       const admin = createSupabaseAdminClient();
-      await admin.storage
+      let uploadRes = await admin.storage
         .from(CONTRACT_STORAGE_BUCKET)
         .upload(storagePath, pdfBuffer, {
           contentType: "application/pdf",
           upsert: true,
         });
+      if (
+        uploadRes.error &&
+        /not found|bucket/i.test(uploadRes.error.message ?? "")
+      ) {
+        await admin.storage.createBucket(CONTRACT_STORAGE_BUCKET, {
+          public: false,
+          fileSizeLimit: 10485760,
+          allowedMimeTypes: ["application/pdf"],
+        });
+        uploadRes = await admin.storage
+          .from(CONTRACT_STORAGE_BUCKET)
+          .upload(storagePath, pdfBuffer, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+      }
     } catch {
-      // Si el gateway HTTP de storage requiere JWT tradicional en vez de sb_sec_,
-      // el path determinista y el hash SHA-256 quedan asegurados en public.contracts y storage.buckets
+      // Si el gateway HTTP de storage falla transitoriamente,
+      // el path determinista y el hash SHA-256 quedan asegurados en public.contracts
     }
 
     // 4. Persistir registro en public.contracts

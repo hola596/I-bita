@@ -13,6 +13,7 @@ import type {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const KYC_PRIVATE_BUCKET = "kyc-documents" as const;
 
@@ -91,37 +92,42 @@ function translateBiometricRejectionReasons(
 }
 
 async function storePrivateKycEvidence(params: {
-  pgClient: Client;
   bookingId: string;
   slotId: string;
   kind: "dni-front" | "selfie";
   buffer: Buffer;
   mimeType: string;
-}): Promise<string> {
-  const { pgClient, bookingId, slotId, kind, buffer, mimeType } = params;
+}): Promise<{ fullPath: string; objectPath: string }> {
+  const { bookingId, slotId, kind, buffer, mimeType } = params;
   const ext = mimeType.replace("image/", "").replace("jpeg", "jpg") || "jpg";
   const objectPath = `${bookingId}/${slotId}/${kind}-${Date.now()}-${crypto
     .randomUUID()
     .slice(0, 8)}.${ext}`;
 
-  try {
-    await pgClient.query(
-      `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-       VALUES ($1, $1, FALSE, 5242880, ARRAY['image/webp','image/jpeg','image/png','image/avif'])
-       ON CONFLICT (id) DO UPDATE SET public = FALSE`,
-      [KYC_PRIVATE_BUCKET]
-    );
-  } catch {
-    // El bucket puede ya estar provisionado por Supabase Storage API
-  }
-
   const adminClient = createSupabaseAdminClient();
-  const uploadRes = await adminClient.storage
+  let uploadRes = await adminClient.storage
     .from(KYC_PRIVATE_BUCKET)
     .upload(objectPath, buffer, {
       contentType: mimeType,
       upsert: false,
     });
+
+  if (
+    uploadRes.error &&
+    /not found|bucket/i.test(uploadRes.error.message ?? "")
+  ) {
+    await adminClient.storage.createBucket(KYC_PRIVATE_BUCKET, {
+      public: false,
+      fileSizeLimit: 5242880,
+      allowedMimeTypes: ["image/webp", "image/jpeg", "image/png", "image/avif"],
+    });
+    uploadRes = await adminClient.storage
+      .from(KYC_PRIVATE_BUCKET)
+      .upload(objectPath, buffer, {
+        contentType: mimeType,
+        upsert: false,
+      });
+  }
 
   if (uploadRes.error) {
     throw new Error(
@@ -129,7 +135,10 @@ async function storePrivateKycEvidence(params: {
     );
   }
 
-  return `${KYC_PRIVATE_BUCKET}/${objectPath}`;
+  return {
+    fullPath: `${KYC_PRIVATE_BUCKET}/${objectPath}`,
+    objectPath,
+  };
 }
 
 export async function POST(request: Request) {
@@ -310,9 +319,11 @@ export async function POST(request: Request) {
 
   await pgClient.connect();
 
-  try {
-    await pgClient.query("BEGIN");
+  const uploadedObjectPaths: string[] = [];
+  let inTransaction = false;
 
+  try {
+    // Fase 1: lecturas rápidas sin transacción SQL abierta (evita locks durante llamadas de red)
     const bookingRes = await pgClient.query<{
       id: string;
       declared_adults_count: number;
@@ -322,13 +333,12 @@ export async function POST(request: Request) {
       `SELECT id, declared_adults_count, verified_adults_count, status::text AS status
        FROM public.bookings
        WHERE id = $1
-       FOR UPDATE`,
+       LIMIT 1`,
       [fields.bookingId]
     );
 
     const booking = bookingRes.rows[0];
     if (!booking) {
-      await pgClient.query("ROLLBACK");
       return NextResponse.json(
         {
           ok: false,
@@ -344,7 +354,6 @@ export async function POST(request: Request) {
       booking.status === "EXPIRED" ||
       booking.status === "ICAL_BLOCK"
     ) {
-      await pgClient.query("ROLLBACK");
       return NextResponse.json(
         {
           ok: false,
@@ -368,13 +377,12 @@ export async function POST(request: Request) {
       `SELECT id, booking_id, is_primary_guest, invite_token, status::text AS status
        FROM public.guest_verifications
        WHERE booking_id = $1 AND invite_token = $2
-       FOR UPDATE`,
+       LIMIT 1`,
       [fields.bookingId, fields.inviteToken]
     );
 
     const targetSlot = slotRes.rows[0];
     if (!targetSlot) {
-      await pgClient.query("ROLLBACK");
       return NextResponse.json(
         {
           ok: false,
@@ -401,7 +409,6 @@ export async function POST(request: Request) {
     );
 
     if (dupRes.rows.length > 0) {
-      await pgClient.query("ROLLBACK");
       return NextResponse.json(
         {
           ok: false,
@@ -417,7 +424,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Invocar microservicio Python biométrico (YuNet + SFace + MiniFASNet)
+    // Fase 2: invocar microservicio Python biométrico (YuNet + SFace + MiniFASNet) sin transacción DB abierta
     let biometricResult: BiometricServiceResponse;
     let biometricProvider = "opencv-sface-minifasnet-v1";
 
@@ -465,10 +472,9 @@ export async function POST(request: Request) {
             "X-API-Key": env.BIOMETRIC_API_KEY ?? "",
           },
           body: outboundForm,
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(25_000),
         });
       } catch {
-        await pgClient.query("ROLLBACK");
         return NextResponse.json(
           {
             ok: false,
@@ -484,7 +490,6 @@ export async function POST(request: Request) {
       }
 
       if (!serviceRes.ok) {
-        await pgClient.query("ROLLBACK");
         return NextResponse.json(
           {
             ok: false,
@@ -566,10 +571,9 @@ export async function POST(request: Request) {
       )
       .digest("hex");
 
-    // Guardar temporalmente en bucket estrictamente privado con expiración TTL (Ley 25.326)
-    const [dniFrontPath, selfiePath] = await Promise.all([
+    // Fase 3: guardar evidencia privada en Storage sin transacción DB abierta (evita deadlock sobre storage.buckets)
+    const [dniStored, selfieStored] = await Promise.all([
       storePrivateKycEvidence({
-        pgClient,
         bookingId: fields.bookingId,
         slotId: targetSlot.id,
         kind: "dni-front",
@@ -577,7 +581,6 @@ export async function POST(request: Request) {
         mimeType: dniMagic.mimeType,
       }),
       storePrivateKycEvidence({
-        pgClient,
         bookingId: fields.bookingId,
         slotId: targetSlot.id,
         kind: "selfie",
@@ -586,9 +589,66 @@ export async function POST(request: Request) {
       }),
     ]);
 
+    uploadedObjectPaths.push(dniStored.objectPath, selfieStored.objectPath);
+    const dniFrontPath = dniStored.fullPath;
+    const selfiePath = selfieStored.fullPath;
+
     const normalizedPct = Number(
       Math.max(0, Math.min(100, biometricResult.similarity_score * 100)).toFixed(2)
     );
+
+    // Fase 4: transacción ultra-corta únicamente para persistir el resultado consistente
+    await pgClient.query("BEGIN");
+    inTransaction = true;
+
+    const lockedBookingRes = await pgClient.query<{
+      id: string;
+      declared_adults_count: number;
+      status: string;
+    }>(
+      `SELECT id, declared_adults_count, status::text AS status
+       FROM public.bookings
+       WHERE id = $1
+       FOR UPDATE`,
+      [fields.bookingId]
+    );
+    const lockedBooking = lockedBookingRes.rows[0] ?? booking;
+
+    const dupCheckInTx = await pgClient.query<{ id: string }>(
+      `SELECT id
+       FROM public.guest_verifications
+       WHERE booking_id = $1
+         AND document_number = $2
+         AND id <> $3
+         AND status::text IN ('VERIFIED', 'MANUAL_REVIEW')
+       LIMIT 1`,
+      [fields.bookingId, parsedPdf417.documentNumber, targetSlot.id]
+    );
+
+    if (dupCheckInTx.rows.length > 0) {
+      await pgClient.query("ROLLBACK");
+      inTransaction = false;
+      try {
+        await createSupabaseAdminClient()
+          .storage.from(KYC_PRIVATE_BUCKET)
+          .remove(uploadedObjectPaths);
+      } catch {
+        // Limpieza best-effort
+      }
+      return NextResponse.json(
+        {
+          ok: false,
+          status: "rejected",
+          error: {
+            code: "DUPLICATE_DNI_IN_BOOKING",
+            message: `El DNI ${maskArgentineDni(
+              parsedPdf417.documentNumber
+            )} ya fue validado por otro adulto de esta reserva.`,
+          },
+        },
+        { status: 409 }
+      );
+    }
 
     await pgClient.query(
       `UPDATE public.guest_verifications
@@ -653,14 +713,14 @@ export async function POST(request: Request) {
     );
 
     const verifiedAdultsCount = Number(countRes.rows[0]?.verified_count ?? 0);
-    const declaredAdultsCount = Number(booking.declared_adults_count);
+    const declaredAdultsCount = Number(lockedBooking.declared_adults_count);
     const allAdultsVerified = verifiedAdultsCount === declaredAdultsCount;
 
     const nextBookingStatus = allAdultsVerified
       ? "ALL_ADULTS_VERIFIED"
-      : booking.status === "ALL_ADULTS_VERIFIED"
+      : lockedBooking.status === "ALL_ADULTS_VERIFIED"
       ? "PAID_PENDING_KYC"
-      : booking.status;
+      : lockedBooking.status;
 
     await pgClient.query(
       `UPDATE public.bookings
@@ -673,6 +733,7 @@ export async function POST(request: Request) {
     );
 
     await pgClient.query("COMMIT");
+    inTransaction = false;
 
     const slotPayload = {
       id: targetSlot.id,
@@ -741,10 +802,21 @@ export async function POST(request: Request) {
       allAdultsVerified,
     });
   } catch (err) {
-    try {
-      await pgClient.query("ROLLBACK");
-    } catch {
-      // Ignorar fallo secundario en rollback
+    if (inTransaction) {
+      try {
+        await pgClient.query("ROLLBACK");
+      } catch {
+        // Ignorar fallo secundario en rollback
+      }
+    }
+    if (uploadedObjectPaths.length > 0) {
+      try {
+        await createSupabaseAdminClient()
+          .storage.from(KYC_PRIVATE_BUCKET)
+          .remove(uploadedObjectPaths);
+      } catch {
+        // Limpieza best-effort en Storage si falló el COMMIT
+      }
     }
     return NextResponse.json(
       {

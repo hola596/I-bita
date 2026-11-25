@@ -620,32 +620,37 @@ async function storePrivateKycEvidence(params: {
   buffer: Buffer;
   mimeType: AllowedKycImageMimeType;
 }): Promise<string> {
-  const { pgClient, bookingId, slotId, kind, buffer, mimeType } = params;
+  const { bookingId, slotId, kind, buffer, mimeType } = params;
   const ext = mimeType.replace("image/", "") || "webp";
   const objectPath = `${bookingId}/${slotId}/${kind}-${Date.now()}-${crypto
     .randomUUID()
     .slice(0, 8)}.${ext}`;
 
-  // Asegurar la existencia del bucket privado `kyc-documents` (`public = false`) en Supabase Storage
-  try {
-    await pgClient.query(
-      `INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-       VALUES ($1, $1, FALSE, 5242880, ARRAY['image/webp','image/jpeg','image/png','image/avif'])
-       ON CONFLICT (id) DO UPDATE SET public = FALSE`,
-      [KYC_PRIVATE_BUCKET]
-    );
-  } catch {
-    // Continuar si el esquema storage es administrado vía API REST
-  }
-
   try {
     const adminClient = createSupabaseAdminClient();
-    await adminClient.storage
+    let uploadRes = await adminClient.storage
       .from(KYC_PRIVATE_BUCKET)
       .upload(objectPath, buffer, {
         contentType: mimeType,
         upsert: false,
       });
+
+    if (
+      uploadRes.error &&
+      /not found|bucket/i.test(uploadRes.error.message ?? "")
+    ) {
+      await adminClient.storage.createBucket(KYC_PRIVATE_BUCKET, {
+        public: false,
+        fileSizeLimit: 5242880,
+        allowedMimeTypes: ["image/webp", "image/jpeg", "image/png", "image/avif"],
+      });
+      uploadRes = await adminClient.storage
+        .from(KYC_PRIVATE_BUCKET)
+        .upload(objectPath, buffer, {
+          contentType: mimeType,
+          upsert: false,
+        });
+    }
   } catch {
     // El path privado queda registrado de forma determinista bajo `kyc-documents/`
   }
