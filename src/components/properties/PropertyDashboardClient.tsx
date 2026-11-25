@@ -22,6 +22,8 @@ import {
 import { getArgentinaTodayYmd } from "@/lib/calendar/availability";
 import { PropertyAvailabilityCalendar } from "@/components/booking/PropertyAvailabilityCalendar";
 import { HostBookingConfirmationsPanel } from "./HostBookingConfirmationsPanel";
+import { HostIdentityReviewsPanel } from "./HostIdentityReviewsPanel";
+import type { HostGuestIdentityItem } from "@/modules/kyc/host-review-actions";
 import {
   createPropertyAction,
   updatePropertyAction,
@@ -195,6 +197,7 @@ interface PropertyDashboardClientProps {
   initialConsortiumConfigs?: Record<string, HostConsortiumConfigRecord>;
   initialMidTermApplications?: HostMidTermApplicationItem[];
   initialBookingConfirmations?: HostBookingConfirmationItem[];
+  initialGuestVerifications?: HostGuestIdentityItem[];
   occupiedRangesByProperty?: Record<string, OccupiedDateRange[]>;
   todayYmd?: string;
   initialHostEarnings?: HostEarningsSummary;
@@ -303,6 +306,7 @@ export function PropertyDashboardClient({
   initialConsortiumConfigs = {},
   initialMidTermApplications = [],
   initialBookingConfirmations = [],
+  initialGuestVerifications = [],
   occupiedRangesByProperty = {},
   todayYmd = getArgentinaTodayYmd(),
   initialHostEarnings,
@@ -1743,6 +1747,10 @@ export function PropertyDashboardClient({
               variant="dashboard"
             />
           )}
+
+          <HostIdentityReviewsPanel
+            initialItems={initialGuestVerifications}
+          />
 
           <HostBookingConfirmationsPanel
             initialItems={initialBookingConfirmations}

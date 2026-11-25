@@ -13,6 +13,7 @@ import {
   listHostBookingConfirmationsAction,
   listHostMidTermApplicationsAction,
 } from "@/modules/bookings/host-approval-actions";
+import { listHostGuestVerificationsAction } from "@/modules/kyc/host-review-actions";
 import { getHostEarningsSummary } from "@/modules/payments/host-earnings";
 import { listHostAllIcalFeedsAction } from "@/modules/ical/actions";
 import { normalizeHostCalendarSyncPreferences } from "@/lib/ical/platform-guides";
@@ -146,6 +147,7 @@ export default async function HostPropertiesDashboardPage() {
     consortiumRes,
     midTermAppsRes,
     hostConfirmationsRes,
+    hostGuestVerificationsRes,
     hostEarnings,
     hostIcalFeedsRes,
   ] = await Promise.all([
@@ -154,6 +156,7 @@ export default async function HostPropertiesDashboardPage() {
     listHostConsortiumConfigsAction(),
     listHostMidTermApplicationsAction(),
     listHostBookingConfirmationsAction(),
+    listHostGuestVerificationsAction(),
     getHostEarningsSummary(user.id),
     listHostAllIcalFeedsAction(),
   ]);
@@ -165,6 +168,9 @@ export default async function HostPropertiesDashboardPage() {
     : [];
   const initialBookingConfirmations = hostConfirmationsRes.ok
     ? hostConfirmationsRes.data
+    : [];
+  const initialGuestVerifications = hostGuestVerificationsRes.ok
+    ? hostGuestVerificationsRes.data
     : [];
   const propertyIdsForCalendar = Array.from(
     new Set([
@@ -237,6 +243,7 @@ export default async function HostPropertiesDashboardPage() {
         initialConsortiumConfigs={initialConsortiumConfigs}
         initialMidTermApplications={initialMidTermApplications}
         initialBookingConfirmations={initialBookingConfirmations}
+        initialGuestVerifications={initialGuestVerifications}
         occupiedRangesByProperty={occupiedRangesByProperty}
         todayYmd={todayYmd}
         initialHostEarnings={hostEarnings}

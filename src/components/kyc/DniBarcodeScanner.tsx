@@ -6,6 +6,7 @@ import {
   Camera,
   FileCheck2,
   Loader2,
+  RefreshCw,
   ScanBarcode,
   Sparkles,
   XCircle,
@@ -44,6 +45,41 @@ const PRESET_RENAPER_ADULT_PAYLOADS: ReadonlyArray<{
   },
 ];
 
+async function openRearCameraStream(preferSimple = false): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Cámara no disponible en este navegador.");
+  }
+  const attempts: MediaStreamConstraints[] = preferSimple
+    ? [
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ]
+    : [
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ];
+
+  let lastErr: unknown;
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("No pudimos acceder a la cámara trasera.");
+}
+
 /**
  * Escáner PDF417 en tiempo real usando `zxing-wasm` (Apache 2.0) con guía visual de encuadre,
  * fallback de carga de imagen y validación automática de DNI argentino (+18 años).
@@ -57,6 +93,9 @@ export function DniBarcodeScanner({
   onNotify,
 }: DniBarcodeScannerProps) {
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraStalled, setCameraStalled] = useState(false);
+  const [cameraSessionTick, setCameraSessionTick] = useState(0);
   const [initializingWasm, setInitializingWasm] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -66,8 +105,13 @@ export function DniBarcodeScanner({
   const rafRef = useRef<number | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const decodingRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const openTokenRef = useRef(0);
+  const readerFnRef = useRef<
+    typeof import("zxing-wasm/reader")["readBarcodes"] | null
+  >(null);
 
-  function stopCamera() {
+  function stopStreamTracksOnly() {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -82,7 +126,14 @@ export function DniBarcodeScanner({
       videoRef.current.srcObject = null;
     }
     decodingRef.current = false;
+  }
+
+  function stopCamera() {
+    openTokenRef.current += 1;
+    stopStreamTracksOnly();
     setCameraActive(false);
+    setCameraReady(false);
+    setCameraStalled(false);
   }
 
   useEffect(() => {
@@ -108,107 +159,58 @@ export function DniBarcodeScanner({
     return true;
   }
 
-  async function startCameraScanner() {
+  async function startCameraScanner(isAutoRetry = false) {
+    const token = ++openTokenRef.current;
+    stopStreamTracksOnly();
     setScanError(null);
+    setCameraReady(false);
+    setCameraStalled(false);
     setInitializingWasm(true);
-    setStatusMessage("Preparando lector PDF417 y abriendo la cámara trasera...");
+    if (!isAutoRetry) {
+      retryCountRef.current = 0;
+    }
+    setStatusMessage(
+      isAutoRetry
+        ? "Reintentando abrir la cámara trasera..."
+        : "Abriendo la cámara trasera y preparando lector PDF417..."
+    );
+
+    // Cargar zxing-wasm en paralelo sin bloquear el montaje inmediato del <video>
+    void import("zxing-wasm/reader")
+      .then(async ({ prepareZXingModule, readBarcodes }) => {
+        await prepareZXingModule({ fireImmediately: true });
+        readerFnRef.current = readBarcodes;
+        if (token === openTokenRef.current && streamRef.current) {
+          setInitializingWasm(false);
+          setStatusMessage(
+            "Encuadrá el código de barras del DNI dentro del recuadro hasta que se lea automáticamente."
+          );
+        }
+      })
+      .catch(() => {
+        if (token === openTokenRef.current) {
+          setInitializingWasm(false);
+        }
+      });
 
     try {
-      const [{ prepareZXingModule, readBarcodes }, stream] = await Promise.all([
-        import("zxing-wasm/reader"),
-        navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-          audio: false,
-        }),
-      ]);
-
-      await prepareZXingModule({ fireImmediately: true });
+      const stream = await openRearCameraStream(isAutoRetry);
+      if (token !== openTokenRef.current) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
 
       streamRef.current = stream;
       setCameraActive(true);
-      setInitializingWasm(false);
-      setStatusMessage(
-        "Encuadrá el código de barras del DNI dentro del rectángulo hasta que se lea automáticamente."
-      );
-
-      requestAnimationFrame(() => {
-        const video = videoRef.current;
-        if (!video || !streamRef.current) return;
-        video.srcObject = streamRef.current;
-        void video.play().catch(() => undefined);
-
-        let lastScanAt = 0;
-        let tick = 0;
-
-        const scanFrame = async (ts: number) => {
-          if (!streamRef.current || !videoRef.current) return;
-
-          if (
-            video.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA &&
-            video.videoWidth > 0 &&
-            !decodingRef.current &&
-            ts - lastScanAt >= 220
-          ) {
-            lastScanAt = ts;
-            tick += 1;
-            decodingRef.current = true;
-
-            try {
-              const canvas =
-                canvasRef.current ?? document.createElement("canvas");
-              canvasRef.current = canvas;
-
-              const vw = video.videoWidth;
-              const vh = video.videoHeight;
-
-              // Alternar recorte central amplio (donde suele encuadrarse el PDF417) y frame completo
-              const useFull = tick % 3 === 0;
-              const sx = useFull ? 0 : Math.floor(vw * 0.08);
-              const sy = useFull ? 0 : Math.floor(vh * 0.22);
-              const sw = useFull ? vw : Math.floor(vw * 0.84);
-              const sh = useFull ? vh : Math.floor(vh * 0.56);
-
-              canvas.width = sw;
-              canvas.height = sh;
-              const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
-              if (ctx) {
-                ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-                const imgData = ctx.getImageData(0, 0, sw, sh);
-                const results = await readBarcodes(imgData, {
-                  formats: ["PDF417"],
-                  tryHarder: true,
-                  tryRotate: true,
-                  tryInvert: true,
-                  maxNumberOfSymbols: 1,
-                });
-
-                const hit = results.find((r) => r.text?.includes("@"));
-                if (hit?.text) {
-                  const ok = applyDecodedRawText(hit.text);
-                  stopCamera();
-                  if (ok || hit.text) return;
-                }
-              }
-            } catch {
-              // Ignorar frames individuales sin lectura clara
-            } finally {
-              decodingRef.current = false;
-            }
-          }
-
-          if (streamRef.current) {
-            rafRef.current = requestAnimationFrame(scanFrame);
-          }
-        };
-
-        rafRef.current = requestAnimationFrame(scanFrame);
-      });
+      setCameraSessionTick((t) => t + 1);
+      if (readerFnRef.current) {
+        setInitializingWasm(false);
+        setStatusMessage(
+          "Encuadrá el código de barras del DNI dentro del recuadro hasta que se lea automáticamente."
+        );
+      }
     } catch {
+      if (token !== openTokenRef.current) return;
       stopCamera();
       setInitializingWasm(false);
       setStatusMessage(
@@ -216,6 +218,150 @@ export function DniBarcodeScanner({
       );
     }
   }
+
+  useEffect(() => {
+    if (!cameraActive || !streamRef.current) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+
+    const markReady = () => {
+      if (cancelled) return;
+      if (
+        video.videoWidth > 0 ||
+        video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      ) {
+        setCameraReady(true);
+        setCameraStalled(false);
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      void video.play().catch(() => undefined);
+      markReady();
+    };
+
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("loadeddata", markReady);
+    video.addEventListener("playing", markReady);
+
+    video.srcObject = streamRef.current;
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      void video.play().catch(() => undefined);
+      markReady();
+    } else {
+      void video.play().catch(() => undefined);
+    }
+
+    let lastScanAt = 0;
+    let tick = 0;
+
+    const scanFrame = async (ts: number) => {
+      if (cancelled || !streamRef.current || !videoRef.current) return;
+
+      const vid = videoRef.current;
+      const readBarcodes = readerFnRef.current;
+
+      if (vid.videoWidth > 0) {
+        setCameraReady(true);
+        setCameraStalled(false);
+      }
+
+      if (
+        readBarcodes &&
+        vid.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA &&
+        vid.videoWidth > 0 &&
+        !decodingRef.current &&
+        ts - lastScanAt >= 220
+      ) {
+        lastScanAt = ts;
+        tick += 1;
+        decodingRef.current = true;
+
+        try {
+          const canvas =
+            canvasRef.current ?? document.createElement("canvas");
+          canvasRef.current = canvas;
+
+          const vw = vid.videoWidth;
+          const vh = vid.videoHeight;
+
+          // Alternar recorte central amplio (donde suele encuadrarse el PDF417) y frame completo
+          const useFull = tick % 3 === 0;
+          const sx = useFull ? 0 : Math.floor(vw * 0.08);
+          const sy = useFull ? 0 : Math.floor(vh * 0.22);
+          const sw = useFull ? vw : Math.floor(vw * 0.84);
+          const sh = useFull ? vh : Math.floor(vh * 0.56);
+
+          canvas.width = sw;
+          canvas.height = sh;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+          if (ctx) {
+            ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, sw, sh);
+            const imgData = ctx.getImageData(0, 0, sw, sh);
+            const results = await readBarcodes(imgData, {
+              formats: ["PDF417"],
+              tryHarder: true,
+              tryRotate: true,
+              tryInvert: true,
+              maxNumberOfSymbols: 1,
+            });
+
+            const hit = results.find((r) => r.text?.includes("@"));
+            if (hit?.text && !cancelled) {
+              applyDecodedRawText(hit.text);
+              stopCamera();
+              return;
+            }
+          }
+        } catch {
+          // Ignorar frames individuales sin lectura clara
+        } finally {
+          decodingRef.current = false;
+        }
+      }
+
+      if (!cancelled && streamRef.current) {
+        rafRef.current = requestAnimationFrame(scanFrame);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(scanFrame);
+
+    const watchdogId = window.setTimeout(() => {
+      if (cancelled || !streamRef.current || !videoRef.current) return;
+      const vid = videoRef.current;
+      if (
+        vid.videoWidth === 0 ||
+        vid.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+      ) {
+        if (retryCountRef.current === 0) {
+          retryCountRef.current = 1;
+          void startCameraScanner(true);
+        } else {
+          setCameraStalled(true);
+          setStatusMessage(
+            "La cámara abrió sin imagen. Tocá 'Reintentar cámara' o usá 'Subir foto del código'."
+          );
+        }
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(watchdogId);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("loadeddata", markReady);
+      video.removeEventListener("playing", markReady);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraActive, cameraSessionTick]);
 
   async function handleBarcodeFileUpload(
     e: React.ChangeEvent<HTMLInputElement>
@@ -272,7 +418,7 @@ export function DniBarcodeScanner({
           <button
             type="button"
             disabled={initializingWasm}
-            onClick={startCameraScanner}
+            onClick={() => void startCameraScanner()}
             className="btn-primary-3d inline-flex min-h-[50px] items-center justify-center gap-2 rounded-2xl px-4 py-3 text-xs sm:text-sm font-extrabold disabled:opacity-50"
           >
             {initializingWasm ? (
@@ -282,7 +428,7 @@ export function DniBarcodeScanner({
             )}
             <span>
               {initializingWasm
-                ? "Cargando escáner..."
+                ? "Abriendo cámara..."
                 : "Escanear DNI con cámara"}
             </span>
           </button>
@@ -321,6 +467,7 @@ export function DniBarcodeScanner({
           <video
             ref={videoRef}
             className="h-full w-full object-cover"
+            autoPlay
             muted
             playsInline
           />
@@ -341,6 +488,34 @@ export function DniBarcodeScanner({
               Alineá el código PDF417 dentro del recuadro
             </span>
           </div>
+
+          {!cameraReady && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-black/80 p-4 text-center text-white">
+              {cameraStalled ? (
+                <>
+                  <p className="text-xs font-extrabold max-w-xs">
+                    La cámara se quedó en negro. Tocá reintentar o usá &quot;Subir foto del código&quot;.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      retryCountRef.current = 0;
+                      void startCameraScanner(true);
+                    }}
+                    className="btn-primary-3d inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-4 text-xs font-extrabold"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Reintentar cámara</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                  <span className="text-xs font-bold">Iniciando vista previa de cámara...</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -158,6 +158,7 @@ export function BiometricCheckinFlow({
   const [usingMockEvidence, setUsingMockEvidence] = useState(false);
 
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [forceRetryManualReview, setForceRetryManualReview] = useState(false);
   const [submitState, setSubmitState] = useState<{
     status: "idle" | "submitting" | "verified" | "manual_review" | "rejected";
     message?: string;
@@ -183,6 +184,7 @@ export function BiometricCheckinFlow({
 
   async function handleSelectSlot(slot: SanitizedVerificationSlotSummary) {
     setSelectedToken(slot.inviteToken);
+    setForceRetryManualReview(false);
     setWizardStep(1);
     setConsentAccepted(false);
     setConsentAcceptedAt(null);
@@ -317,6 +319,7 @@ export function BiometricCheckinFlow({
         return;
       }
 
+      setForceRetryManualReview(false);
       setSubmitState({
         status: data.status,
         message: data.message,
@@ -390,7 +393,7 @@ export function BiometricCheckinFlow({
 
   const isActiveSlotCompleted =
     activeSlot?.status === "VERIFIED" ||
-    activeSlot?.status === "MANUAL_REVIEW";
+    (activeSlot?.status === "MANUAL_REVIEW" && !forceRetryManualReview);
 
   const nextPendingSlot = useMemo(
     () =>
@@ -487,27 +490,7 @@ export function BiometricCheckinFlow({
             const isVerified = slot.status === "VERIFIED";
             const isManualReview = slot.status === "MANUAL_REVIEW";
 
-            const isActiveSlotCompleted =
-    activeSlot?.status === "VERIFIED" ||
-    activeSlot?.status === "MANUAL_REVIEW";
-
-  const nextPendingSlot = useMemo(
-    () =>
-      slots.find(
-        (s) =>
-          s.inviteToken !== activeSlot?.inviteToken &&
-          s.status !== "VERIFIED" &&
-          s.status !== "MANUAL_REVIEW"
-      ) ?? null,
-    [slots, activeSlot?.inviteToken]
-  );
-
-  const pendingCount = useMemo(
-    () => slots.filter((s) => s.status !== "VERIFIED").length,
-    [slots]
-  );
-
-  return (
+            return (
               <div
                 key={slot.id}
                 className={`rounded-2xl border p-4 transition-all space-y-3 ${
@@ -616,6 +599,13 @@ export function BiometricCheckinFlow({
             livenessScore={submitState.livenessScore}
             onSelectNextPendingSlot={handleSelectSlot}
             onCopyInviteLink={handleCopyInviteLink}
+            onRetryVerification={() => {
+              setForceRetryManualReview(true);
+              setDniFrontImage(null);
+              setLiveSelfie(null);
+              setSubmitState({ status: "idle" });
+              setWizardStep(consentAccepted && parsedDni ? 3 : 1);
+            }}
           />
         ) : activeSlot ? (
           <form onSubmit={handleSubmitBiometrics} className="space-y-6">
@@ -644,27 +634,7 @@ export function BiometricCheckinFlow({
                   (item.step === 1 && consentAccepted && wizardStep > 1) ||
                   (item.step === 2 && Boolean(parsedDni) && wizardStep > 2);
 
-                const isActiveSlotCompleted =
-    activeSlot?.status === "VERIFIED" ||
-    activeSlot?.status === "MANUAL_REVIEW";
-
-  const nextPendingSlot = useMemo(
-    () =>
-      slots.find(
-        (s) =>
-          s.inviteToken !== activeSlot?.inviteToken &&
-          s.status !== "VERIFIED" &&
-          s.status !== "MANUAL_REVIEW"
-      ) ?? null,
-    [slots, activeSlot?.inviteToken]
-  );
-
-  const pendingCount = useMemo(
-    () => slots.filter((s) => s.status !== "VERIFIED").length,
-    [slots]
-  );
-
-  return (
+                return (
                   <button
                     key={item.step}
                     type="button"
@@ -731,14 +701,13 @@ export function BiometricCheckinFlow({
                     Autorizo el uso biométrico de mi DNI y mi selfie en vivo
                     únicamente para validar mi identidad e ingreso
                   </strong>{" "}
-                  ante el consorcio{" "}
+                  ante el anfitrión y el consorcio{" "}
                   <strong>
                     {initialState.consortium?.consortiumName ??
                       booking.propertyTitle}
                   </strong>{" "}
                   conforme a la Ley 25.326. Las imágenes crudas se almacenan de
-                  forma privada y se eliminan automáticamente entre 24 y 72 hs
-                  después de completar la auditoría.
+                  forma privada (accesibles por revisión temporal solo si se requiere confirmación manual) y se eliminan automáticamente entre 24 y 72 hs.
                 </span>
               </label>
 

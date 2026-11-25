@@ -6,6 +6,7 @@ import { env } from "@/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { parseArgentineDniPdf417Strict, maskArgentineDni } from "@/lib/kyc/pdf417Parser";
 import { MAX_KYC_SERVER_BYTES } from "@/lib/kyc/imageQuality";
+import { sendPushNotificationToUser } from "@/lib/push";
 import type {
   BiometricServiceResponse,
   LivenessCaptureMetadata,
@@ -329,10 +330,19 @@ export async function POST(request: Request) {
       declared_adults_count: number;
       verified_adults_count: number;
       status: string;
+      host_id: string | null;
+      property_title: string | null;
     }>(
-      `SELECT id, declared_adults_count, verified_adults_count, status::text AS status
-       FROM public.bookings
-       WHERE id = $1
+      `SELECT
+         b.id,
+         b.declared_adults_count,
+         b.verified_adults_count,
+         b.status::text AS status,
+         p.host_id,
+         p.title AS property_title
+       FROM public.bookings b
+       INNER JOIN public.properties p ON p.id = b.property_id
+       WHERE b.id = $1
        LIMIT 1`,
       [fields.bookingId]
     );
@@ -734,6 +744,25 @@ export async function POST(request: Request) {
 
     await pgClient.query("COMMIT");
     inTransaction = false;
+
+    if (booking.host_id) {
+      const propLabel = booking.property_title?.trim() || "tu propiedad";
+      if (apiStatus === "manual_review") {
+        void sendPushNotificationToUser(booking.host_id, {
+          title: "Identidad de huésped para revisar",
+          body: `${parsedPdf417.fullName} completó su DNI y selfie en ${propLabel} y quedó para tu confirmación rápida.`,
+          url: "/dashboard/propiedades",
+          tag: `kyc-manual-${targetSlot.id}`,
+        });
+      } else if (apiStatus === "verified" && allAdultsVerified) {
+        void sendPushNotificationToUser(booking.host_id, {
+          title: "¡Check-in biométrico completo!",
+          body: `Todos los adultos (${verifiedAdultsCount}/${declaredAdultsCount}) validaron su identidad en ${propLabel}.`,
+          url: "/dashboard/propiedades",
+          tag: `kyc-complete-${fields.bookingId}`,
+        });
+      }
+    }
 
     const slotPayload = {
       id: targetSlot.id,

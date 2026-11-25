@@ -41,6 +41,7 @@ interface PostVerificationNextStepsProps {
   livenessScore?: number | null;
   onSelectNextPendingSlot: (slot: SanitizedVerificationSlotSummary) => void;
   onCopyInviteLink: (slot: SanitizedVerificationSlotSummary) => void;
+  onRetryVerification?: () => void;
 }
 
 export function PostVerificationNextSteps({
@@ -56,6 +57,7 @@ export function PostVerificationNextSteps({
   livenessScore,
   onSelectNextPendingSlot,
   onCopyInviteLink,
+  onRetryVerification,
 }: PostVerificationNextStepsProps) {
   const { notify } = usePreferences();
   const [copiedCode, setCopiedCode] = useState(false);
@@ -138,15 +140,24 @@ export function PostVerificationNextSteps({
               Recibimos tu DNI y selfie para {activeSlot.fullNameExtracted ?? `Adulto #${activeSlot.slotIndex}`}
             </h3>
             <p className="text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
-              Como la coincidencia facial quedó en zona intermedia{metricsLabel ? ` (${metricsLabel})` : ""}, nuestro equipo la confirma manualmente. Te notificaremos apenas quede aprobada.
+              Como la coincidencia facial quedó en zona intermedia{metricsLabel ? ` (${metricsLabel})` : ""}, el anfitrión o nuestro equipo ya pueden confirmarla manualmente desde su panel. Te notificaremos apenas quede aprobada.
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-3">
+          {onRetryVerification && (
+            <button
+              type="button"
+              onClick={onRetryVerification}
+              className="btn-primary-3d inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl px-5 text-sm font-extrabold"
+            >
+              <span>Repetir foto y selfie con mejor luz</span>
+            </button>
+          )}
           <Link
             href={`/mensajes?booking=${booking.id}`}
-            className="btn-primary-3d inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl px-5 text-sm font-extrabold"
+            className={`${onRetryVerification ? "btn-secondary-3d" : "btn-primary-3d"} inline-flex min-h-[46px] items-center justify-center gap-2 rounded-2xl px-5 text-sm font-extrabold`}
           >
             <MessageSquare className="h-4 w-4" aria-hidden="true" />
             <span>Consultar en Mensajes</span>

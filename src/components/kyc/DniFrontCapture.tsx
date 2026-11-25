@@ -19,6 +19,41 @@ interface DniFrontCaptureProps {
   onNotify?: (message: string, tone: "info" | "success") => void;
 }
 
+async function openRearCameraStream(preferSimple = false): Promise<MediaStream> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Cámara no disponible en este navegador.");
+  }
+  const attempts: MediaStreamConstraints[] = preferSimple
+    ? [
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ]
+    : [
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ];
+
+  let lastErr: unknown;
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("No pudimos acceder a la cámara trasera.");
+}
+
 /**
  * Captura del frente del DNI tarjeta mediante cámara con marco guía rectangular o subida de archivo,
  * con análisis automático de nitidez/reflejos (IQA) y compresión a <= 300 KB.
@@ -29,13 +64,18 @@ export function DniFrontCapture({
   onNotify,
 }: DniFrontCaptureProps) {
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraStalled, setCameraStalled] = useState(false);
+  const [cameraSessionTick, setCameraSessionTick] = useState(0);
   const [processing, setProcessing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const retryCountRef = useRef(0);
+  const openTokenRef = useRef(0);
 
-  function stopCamera() {
+  function stopStreamTracks() {
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) {
         track.stop();
@@ -45,7 +85,14 @@ export function DniFrontCapture({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+  }
+
+  function stopCamera() {
+    openTokenRef.current += 1;
+    stopStreamTracks();
     setCameraActive(false);
+    setCameraReady(false);
+    setCameraStalled(false);
   }
 
   useEffect(() => {
@@ -54,32 +101,86 @@ export function DniFrontCapture({
     };
   }, []);
 
-  async function startCamera() {
+  async function startCamera(isAutoRetry = false) {
+    const token = ++openTokenRef.current;
+    stopStreamTracks();
     setErrorMsg(null);
+    setCameraReady(false);
+    setCameraStalled(false);
+    if (!isAutoRetry) {
+      retryCountRef.current = 0;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+      const stream = await openRearCameraStream(isAutoRetry);
+      if (token !== openTokenRef.current) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
       streamRef.current = stream;
       setCameraActive(true);
-      requestAnimationFrame(() => {
-        if (videoRef.current && streamRef.current) {
-          videoRef.current.srcObject = streamRef.current;
-          void videoRef.current.play().catch(() => undefined);
-        }
-      });
+      setCameraSessionTick((t) => t + 1);
     } catch {
+      if (token !== openTokenRef.current) return;
       stopCamera();
       setErrorMsg(
         "No pudimos abrir la cámara trasera en este dispositivo. Usá el botón de subir foto desde tu galería."
       );
     }
   }
+
+  useEffect(() => {
+    if (!cameraActive || !streamRef.current) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+    const markReady = () => {
+      if (cancelled) return;
+      if (video.videoWidth > 0 || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        setCameraReady(true);
+        setCameraStalled(false);
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      void video.play().catch(() => undefined);
+      markReady();
+    };
+
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("loadeddata", markReady);
+    video.addEventListener("playing", markReady);
+
+    video.srcObject = streamRef.current;
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      void video.play().catch(() => undefined);
+      markReady();
+    } else {
+      void video.play().catch(() => undefined);
+    }
+
+    const watchdogId = window.setTimeout(() => {
+      if (cancelled || !streamRef.current || !videoRef.current) return;
+      const vid = videoRef.current;
+      if (vid.videoWidth === 0 || vid.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        if (retryCountRef.current === 0) {
+          retryCountRef.current = 1;
+          void startCamera(true);
+        } else {
+          setCameraStalled(true);
+        }
+      }
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(watchdogId);
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("loadeddata", markReady);
+      video.removeEventListener("playing", markReady);
+    };
+  }, [cameraActive, cameraSessionTick]);
 
   async function handleCaptureFromCamera() {
     const video = videoRef.current;
@@ -162,7 +263,7 @@ export function DniFrontCapture({
           <button
             type="button"
             disabled={processing}
-            onClick={startCamera}
+            onClick={() => void startCamera()}
             className="btn-primary-3d inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl px-4 text-xs font-extrabold disabled:opacity-50"
           >
             <Camera className="h-4 w-4" aria-hidden="true" />
@@ -189,6 +290,7 @@ export function DniFrontCapture({
             <video
               ref={videoRef}
               className="h-full w-full object-cover"
+              autoPlay
               muted
               playsInline
             />
@@ -202,6 +304,34 @@ export function DniFrontCapture({
                 Encuadrá el frente completo del DNI
               </span>
             </div>
+
+            {!cameraReady && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-black/75 p-4 text-center text-white">
+                {cameraStalled ? (
+                  <>
+                    <p className="text-xs font-extrabold max-w-xs">
+                      La cámara abrió sin mostrar imagen. Tocá reintentar o subí la foto directamente.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        retryCountRef.current = 0;
+                        void startCamera(true);
+                      }}
+                      className="btn-primary-3d inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-4 text-xs font-extrabold"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Reintentar cámara</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                    <span className="text-xs font-bold">Iniciando cámara trasera...</span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
