@@ -8,10 +8,20 @@ import { submitContactInquiryAction } from "@/modules/contact/actions";
 import { AchievementBanner } from "@/components/ui/AchievementBanner";
 import { ProgressiveFlowShell } from "@/components/ui/ProgressiveFlowShell";
 import { usePreferences } from "@/components/providers/PreferencesProvider";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/client-events";
 
-const HELP_TOPICS: readonly string[] = [
-  "Publicar mi departamento",
-  "Conectar calendario de Airbnb",
+const GUEST_HELP_TOPICS: readonly string[] = [
+  "Ayuda con una reserva",
+  "Validación de DNI o ingreso al edificio",
+  "Pagos, cuotas o cancelación",
+  "Consultar sobre una estadía o alojamiento",
+  "Otro tema",
+];
+
+const HOST_HELP_TOPICS: readonly string[] = [
+  "Conectar calendario (Airbnb / Booking / Google)",
+  "Publicar o editar mi departamento",
+  "Cobros y liquidaciones",
   "Consultar sobre un edificio o consorcio",
   "Ayuda con una reserva",
   "Otro tema",
@@ -37,6 +47,7 @@ const STEP_COPY: ReadonlyArray<{ title: string; subtitle: string }> = [
 export default function ContactoPage() {
   const { notify } = usePreferences();
   const [hasSession, setHasSession] = useState(false);
+  const [isHostExperience, setIsHostExperience] = useState(false);
   const [step, setStep] = useState<0 | 1 | 2>(0);
   const [direction, setDirection] = useState<"forward" | "backward">("forward");
   const [subject, setSubject] = useState("");
@@ -53,9 +64,46 @@ export default function ContactoPage() {
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (active) setHasSession(Boolean(user));
+        if (!active) return;
+
+        if (!user) {
+          setHasSession(false);
+          setIsHostExperience(false);
+          return;
+        }
+
+        setHasSession(true);
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, role, host_approval_status")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        const approvalStatus = String(profile?.host_approval_status ?? "");
+        const hostUser =
+          profile?.role === "SUPERADMIN" ||
+          profile?.role === "HOST" ||
+          approvalStatus === "APPROVED" ||
+          approvalStatus === "PENDING_APPROVAL" ||
+          approvalStatus === "REJECTED";
+        setIsHostExperience(hostUser);
+
+        if (user.email) {
+          setEmail((prev) => (prev.trim() ? prev : user.email ?? ""));
+        }
+        if (profile?.full_name) {
+          setFullName((prev) =>
+            prev.trim() ? prev : String(profile.full_name ?? "")
+          );
+        }
       } catch {
-        if (active) setHasSession(false);
+        if (active) {
+          setHasSession(false);
+          setIsHostExperience(false);
+        }
       }
     }
 
@@ -63,8 +111,8 @@ export default function ContactoPage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (active) setHasSession(Boolean(session?.user));
+    } = supabase.auth.onAuthStateChange(() => {
+      void syncSession();
     });
 
     return () => {
@@ -119,6 +167,7 @@ export default function ContactoPage() {
           : "Registramos tu consulta dentro de I-bita. Iniciá sesión con el mismo correo para ver la respuesta desde tu cuenta.",
         conversationId: res.data.conversationId,
       });
+      dispatchNotificationsRefresh();
       notify("¡Mensaje enviado dentro de I-bita!", "celebration", "chat");
     } else {
       setStatus({
@@ -183,6 +232,7 @@ export default function ContactoPage() {
   }
 
   const copy = STEP_COPY[step] ?? STEP_COPY[0]!;
+  const activeTopics = isHostExperience ? HOST_HELP_TOPICS : GUEST_HELP_TOPICS;
 
   return (
     <form onSubmit={handleSubmit} noValidate>
@@ -256,7 +306,7 @@ export default function ContactoPage() {
         {step === 0 && (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              {HELP_TOPICS.map((topic) => {
+              {activeTopics.map((topic) => {
                 const selected = subject.trim() === topic;
                 return (
                   <button
